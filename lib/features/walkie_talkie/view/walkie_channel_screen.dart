@@ -1,0 +1,268 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/di/injection.dart';
+import '../../../core/widgets/neumorphic_container.dart';
+import '../bloc/walkie_talkie_bloc.dart';
+import '../bloc/walkie_talkie_event_state.dart';
+import '../models/walkie_group_entity.dart';
+import '../services/audio_capture_service.dart';
+
+class WalkieChannelScreen extends StatefulWidget {
+  final WalkieGroupEntity group;
+  const WalkieChannelScreen({super.key, required this.group});
+
+  @override
+  State<WalkieChannelScreen> createState() => _WalkieChannelScreenState();
+}
+
+class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTickerProviderStateMixin {
+  late final WalkieTalkieBloc _bloc;
+  late final AnimationController _waveController;
+
+  @override
+  void initState() {
+    super.initState();
+    _bloc = getIt<WalkieTalkieBloc>()..add(WalkieChannelEntered(widget.group));
+    _waveController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider.value(
+      value: _bloc,
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Top Bar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    GestureDetector(
+                      onTap: () => context.go('/walkie-talkie'),
+                      child: const NeumorphicContainer(
+                        width: 50,
+                        height: 50,
+                        shape: BoxShape.circle,
+                        child: Icon(Icons.menu),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chat opened.')));
+                      },
+                      child: const NeumorphicContainer(
+                        width: 50,
+                        height: 50,
+                        shape: BoxShape.circle,
+                        child: Icon(Icons.chat_bubble_rounded, size: 20),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Active Contact Card
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: NeumorphicContainer(
+                  padding: const EdgeInsets.all(16),
+                  borderRadius: 20,
+                  child: Row(
+                    children: [
+                      const NeumorphicContainer(
+                        width: 60,
+                        height: 60,
+                        shape: BoxShape.circle,
+                        child: Icon(Icons.person, size: 30),
+                      ),
+                      const SizedBox(width: 16),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.group.name,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 18),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Available',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              // Main PTT Area (mimicking the bottom sheet)
+              Expanded(
+                child: NeumorphicContainer(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  borderRadius: 40,
+                  child: BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
+                    builder: (context, state) {
+                      final isTransmitting = state is WalkieTalkieInChannel && state.status == TransmissionStatus.transmitting;
+                      final isReceiving = state is WalkieTalkieInChannel && state.status == TransmissionStatus.receiving;
+                      
+                      return Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Positioned(
+                            top: 16,
+                            child: Container(
+                              width: 60,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          
+                          // Giant PTT Button anchored to center-bottom
+                          Positioned(
+                            bottom: 160,
+                            child: GestureDetector(
+                              onLongPressStart: (_) => _bloc.add(WalkiePTTPressed()),
+                              onLongPressEnd: (_) => _bloc.add(WalkiePTTReleased()),
+                              child: NeumorphicContainer(
+                                width: 220,
+                                height: 220,
+                                shape: BoxShape.circle,
+                                isPressed: isTransmitting,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.mic,
+                                    size: 100,
+                                    color: isTransmitting ? Colors.red : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[300] : Colors.grey[400]),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Waveform below PTT
+                          Positioned(
+                            bottom: 100,
+                            left: 0,
+                            right: 0,
+                            child: SizedBox(
+                              height: 60,
+                              child: StreamBuilder<double>(
+                                stream: getIt<AudioCaptureService>().amplitudeStream,
+                                initialData: 0.0,
+                                builder: (context, snapshot) {
+                                  final amplitude = snapshot.data ?? 0.0;
+                                  return Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: List.generate(40, (index) {
+                                      // Default animation baseline
+                                      double activeHeight = 8.0;
+                                      
+                                      if (isTransmitting) {
+                                        // Dynamic based on microphone
+                                        final localScale = (index % 5 + 1) / 5; // create some wave variation
+                                        activeHeight = 8.0 + (50 * amplitude * localScale);
+                                      } else if (isReceiving) {
+                                        // Keep standard animation for receiving for now
+                                        activeHeight = 8.0 + (30 * (_waveController.value * ((index % 6) + 1) / 6));
+                                      }
+
+                                      return AnimatedContainer(
+                                        duration: const Duration(milliseconds: 50),
+                                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                                        width: 3,
+                                        height: activeHeight,
+                                        decoration: BoxDecoration(
+                                          color: isTransmitting || isReceiving 
+                                            ? Theme.of(context).primaryColor 
+                                            : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[700] : Colors.grey[400]),
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                      );
+                                    }),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+
+                          // Bottom Action Row
+                          Positioned(
+                            bottom: 24,
+                            left: 32,
+                            right: 32,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('History log opened.')));
+                                  },
+                                  child: const NeumorphicContainer(
+                                    width: 50,
+                                    height: 50,
+                                    borderRadius: 16,
+                                    child: Icon(Icons.history),
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status set to Active.')));
+                                  },
+                                  child: NeumorphicContainer(
+                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                    borderRadius: 20,
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.check_circle_outline, color: Colors.green, size: 20),
+                                        const SizedBox(width: 8),
+                                        Text('Active', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.green, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ping: 12ms (Local UDP)')));
+                                  },
+                                  child: const NeumorphicContainer(
+                                    width: 50,
+                                    height: 50,
+                                    borderRadius: 16,
+                                    child: Icon(Icons.bar_chart, color: Colors.green),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "app_name": "VibeCast",
+  "groups": "Groups",
+  "users": "Users",
+  "new_group": "New Group",
+  "hold_to_talk": "HOLD\nTO TALK",
+  "transmitting": "TRANSMITTING...",
+  "members_online": "MEMBERS ONLINE",
+  "busy": "BUSY"
+}
