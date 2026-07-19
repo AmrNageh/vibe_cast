@@ -1,3 +1,4 @@
 class AppConfig {
-  static const String serverUrl = 'https://vibe2-hxn784go.b4a.run';
+  // Use 10.0.2.2 for Android Emulator, or localhost for web/iOS simulator
+  static const String serverUrl = 'https://evibe2-zkp3v41l.b4a.run';
 }
