@@ -41,8 +41,14 @@ class WalkieSignalService {
     _socket?.on('walkie:chat_history', (data) => _chatHistoryController.add(data));
     _socket?.on('walkie:audio', (data) {
       if (data != null && data['audioBlob'] != null) {
-        List<dynamic> list = data['audioBlob'];
-        _audioController.add(Uint8List.fromList(list.cast<int>()));
+        final audioBlob = data['audioBlob'];
+        if (audioBlob is Uint8List) {
+          _audioController.add(audioBlob);
+        } else if (audioBlob is List<dynamic>) {
+          _audioController.add(Uint8List.fromList(audioBlob.cast<int>()));
+        } else if (audioBlob is List<int>) {
+          _audioController.add(Uint8List.fromList(audioBlob));
+        }
       }
     });
 
