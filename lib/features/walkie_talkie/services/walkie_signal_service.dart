@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
@@ -42,12 +43,17 @@ class WalkieSignalService {
     _socket?.on('walkie:audio', (data) {
       if (data != null && data['audioBlob'] != null) {
         final audioBlob = data['audioBlob'];
-        if (audioBlob is Uint8List) {
+        if (audioBlob is String) {
+          _audioController.add(base64Decode(audioBlob));
+        } else if (audioBlob is Uint8List) {
           _audioController.add(audioBlob);
         } else if (audioBlob is List<dynamic>) {
           _audioController.add(Uint8List.fromList(audioBlob.cast<int>()));
         } else if (audioBlob is List<int>) {
           _audioController.add(Uint8List.fromList(audioBlob));
+        } else if (audioBlob is Map && audioBlob['type'] == 'Buffer' && audioBlob['data'] != null) {
+          final dataList = audioBlob['data'] as List<dynamic>;
+          _audioController.add(Uint8List.fromList(dataList.cast<int>()));
         }
       }
     });
@@ -101,10 +107,11 @@ class WalkieSignalService {
   }
 
   void sendAudio(String groupId, String senderId, Uint8List audioData) {
+    final base64String = base64Encode(audioData);
     _socket?.emit('walkie:audio', {
       'groupId': groupId,
       'senderId': senderId,
-      'audioBlob': audioData,
+      'audioBlob': base64String,
     });
   }
 
