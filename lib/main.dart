@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'core/di/injection.dart';
-import 'core/routes/app_routes.dart';
-import 'core/theme/app_theme.dart';
+import 'package:vibe_cast/core/di/injection.dart';
+import 'package:vibe_cast/core/routes/app_routes.dart';
+import 'package:vibe_cast/core/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

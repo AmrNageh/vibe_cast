@@ -37,7 +37,10 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     on<WalkieIncomingTransmission>(_onIncomingTransmission);
     on<WalkieTransmissionEnded>(_onTransmissionEnded);
     on<WalkieHistoryUpdated>(_onHistoryUpdated);
+    on<WalkieChatHistoryUpdated>(_onChatHistoryUpdated);
+    on<WalkieChatMessageReceived>(_onChatMessageReceived);
     on<WalkieGroupCreated>(_onGroupCreated);
+    on<WalkieGroupJoinedByInvite>(_onGroupJoinedByInvite);
     on<WalkieCodecToggled>(_onCodecToggled);
   }
 
@@ -46,7 +49,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     try {
       await _udpTransportService.initialize();
       // Connect to the signaling server
-      _walkieSignalService.connect('http://192.168.1.6:4000');
+      _walkieSignalService.connect('https://vibe2-hxn784go.b4a.run');
       
       _pttSignalSub = _walkieSignalService.pttStream.listen((data) {
         if (data['type'] == 'start') {
@@ -67,11 +70,18 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
       _walkieSignalService.historyStream.listen((data) {
         add(WalkieHistoryUpdated(data));
       });
+      _walkieSignalService.chatHistoryStream.listen((data) {
+        add(WalkieChatHistoryUpdated(data));
+      });
+      _walkieSignalService.chatStream.listen((data) {
+        add(WalkieChatMessageReceived(data));
+      });
       _walkieSignalService.errorStream.listen((errorMsg) {
         // Just emit failure if error happens (like group full)
         emit(WalkieTalkieFailure(errorMsg));
       });
 
+      await _walkieRepository.initIdentity();
       final groups = await _walkieRepository.getGroups();
       emit(WalkieTalkieGroupsLoaded(groups: groups, onlineUsers: const []));
     } catch (e) {
@@ -99,8 +109,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
       
       await _audioCaptureService.start();
       _audioCaptureSub = _audioCaptureService.audioStream.listen((data) {
-        // Send to multicast IP or specific target based on backend
-        _udpTransportService.startTransmitting(data, '239.0.0.1', 41234);
+        _walkieSignalService.sendAudio(currentState.group.id, _walkieRepository.userId, data);
       });
 
       _walkieSignalService.startPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
@@ -126,7 +135,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
         activeTransmitterName: event.senderName,
       ));
 
-      _audioPlaybackService.playStream(_udpTransportService.audioStream);
+      _audioPlaybackService.playStream(_walkieSignalService.audioStream);
     }
   }
 
@@ -157,6 +166,21 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     }
   }
 
+  void _onChatHistoryUpdated(WalkieChatHistoryUpdated event, Emitter<WalkieTalkieState> emit) {
+    final currentState = state;
+    if (currentState is WalkieTalkieInChannel) {
+      emit(currentState.copyWith(chatHistory: event.chatHistory));
+    }
+  }
+
+  void _onChatMessageReceived(WalkieChatMessageReceived event, Emitter<WalkieTalkieState> emit) {
+    final currentState = state;
+    if (currentState is WalkieTalkieInChannel) {
+      final updatedHistory = List<dynamic>.from(currentState.chatHistory)..add(event.message);
+      emit(currentState.copyWith(chatHistory: updatedHistory));
+    }
+  }
+
   Future<void> _onGroupCreated(WalkieGroupCreated event, Emitter<WalkieTalkieState> emit) async {
     final currentState = state;
     if (currentState is WalkieTalkieGroupsLoaded) {
@@ -166,6 +190,24 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
           groups: [...currentState.groups, newGroup],
           onlineUsers: currentState.onlineUsers,
         ));
+      } catch (e) {
+        emit(WalkieTalkieFailure(e.toString()));
+      }
+    }
+  }
+
+  Future<void> _onGroupJoinedByInvite(WalkieGroupJoinedByInvite event, Emitter<WalkieTalkieState> emit) async {
+    final currentState = state;
+    if (currentState is WalkieTalkieGroupsLoaded) {
+      try {
+        final newGroup = await _walkieRepository.joinGroupFromInvite(event.inviteId);
+        // Avoid duplicate adding
+        if (!currentState.groups.any((g) => g.id == newGroup.id)) {
+          emit(WalkieTalkieGroupsLoaded(
+            groups: [...currentState.groups, newGroup],
+            onlineUsers: currentState.onlineUsers,
+          ));
+        }
       } catch (e) {
         emit(WalkieTalkieFailure(e.toString()));
       }

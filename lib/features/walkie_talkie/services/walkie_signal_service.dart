@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -6,47 +7,52 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 class WalkieSignalService {
   io.Socket? _socket;
   
-  final _pttStreamController = StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get pttStream => _pttStreamController.stream;
-
-  final _onlineUsersController = StreamController<List<Map<String, dynamic>>>.broadcast();
-  Stream<List<Map<String, dynamic>>> get onlineUsersStream => _onlineUsersController.stream;
-
-  final _historyController = StreamController<List<Map<String, dynamic>>>.broadcast();
-  Stream<List<Map<String, dynamic>>> get historyStream => _historyController.stream;
-
+  final _pttController = StreamController<Map<String, dynamic>>.broadcast();
+  final _onlineUsersController = StreamController<List<dynamic>>.broadcast();
+  final _historyController = StreamController<List<dynamic>>.broadcast();
   final _errorController = StreamController<String>.broadcast();
+  final _chatController = StreamController<Map<String, dynamic>>.broadcast();
+  final _chatHistoryController = StreamController<List<dynamic>>.broadcast();
+  final _audioController = StreamController<Uint8List>.broadcast();
+
+  Stream<Map<String, dynamic>> get pttStream => _pttController.stream;
+  Stream<List<dynamic>> get onlineUsersStream => _onlineUsersController.stream;
+  Stream<List<dynamic>> get historyStream => _historyController.stream;
   Stream<String> get errorStream => _errorController.stream;
+  Stream<Map<String, dynamic>> get chatStream => _chatController.stream;
+  Stream<List<dynamic>> get chatHistoryStream => _chatHistoryController.stream;
+  Stream<Uint8List> get audioStream => _audioController.stream;
 
   void connect(String serverUrl) {
-    _socket = io.io(serverUrl, <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': false,
+    _socket = io.io(serverUrl, io.OptionBuilder()
+        .setTransports(['websocket'])
+        .disableAutoConnect()
+        .build());
+
+    _socket?.onConnect((_) {
+      debugPrint('WalkieSignalService connected');
     });
 
-    _socket?.connect();
-
-    _socket?.on('walkie:ptt_start', (data) {
-      data['type'] = 'start';
-      _pttStreamController.add(Map<String, dynamic>.from(data));
-    });
-
-    _socket?.on('walkie:ptt_stop', (data) {
-      data['type'] = 'stop';
-      _pttStreamController.add(Map<String, dynamic>.from(data));
-    });
-    
-    _socket?.on('walkie:online_users', (data) {
-      _onlineUsersController.add(List<Map<String, dynamic>>.from(data));
-    });
-
-    _socket?.on('walkie:history', (data) {
-      _historyController.add(List<Map<String, dynamic>>.from(data));
+    _socket?.on('walkie:ptt_start', (data) => _pttController.add({'type': 'start', ...data}));
+    _socket?.on('walkie:ptt_stop', (data) => _pttController.add({'type': 'stop', ...data}));
+    _socket?.on('walkie:online_users', (data) => _onlineUsersController.add(data));
+    _socket?.on('walkie:history', (data) => _historyController.add(data));
+    _socket?.on('walkie:chat_message', (data) => _chatController.add(data));
+    _socket?.on('walkie:chat_history', (data) => _chatHistoryController.add(data));
+    _socket?.on('walkie:audio', (data) {
+      if (data != null && data['audioBlob'] != null) {
+        List<dynamic> list = data['audioBlob'];
+        _audioController.add(Uint8List.fromList(list.cast<int>()));
+      }
     });
 
     _socket?.on('walkie:error', (data) {
-      _errorController.add(data['message']?.toString() ?? 'Unknown error');
+      if (data is Map && data.containsKey('message')) {
+        _errorController.add(data['message']);
+      }
     });
+
+    _socket?.connect();
   }
 
   void joinGroup(String groupId, int udpPort, String localIp, String? userName, String? userId) {
@@ -71,11 +77,28 @@ class WalkieSignalService {
     });
   }
 
+  void sendChatMessage(String groupId, String senderName, String senderId, String message) {
+    _socket?.emit('walkie:chat_message', {
+      'groupId': groupId,
+      'senderName': senderName,
+      'senderId': senderId,
+      'message': message,
+    });
+  }
+
   void stopPtt(String groupId, String senderName, String? senderId) {
     _socket?.emit('walkie:ptt_stop', {
       'groupId': groupId,
       'senderName': senderName,
       'senderId': senderId,
+    });
+  }
+
+  void sendAudio(String groupId, String senderId, Uint8List audioData) {
+    _socket?.emit('walkie:audio', {
+      'groupId': groupId,
+      'senderId': senderId,
+      'audioBlob': audioData,
     });
   }
 

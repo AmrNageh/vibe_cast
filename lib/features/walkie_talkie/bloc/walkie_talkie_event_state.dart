@@ -28,6 +28,15 @@ class WalkieGroupCreated extends WalkieTalkieEvent {
   List<Object?> get props => [name, memberIds, isPrivate];
 }
 
+class WalkieGroupJoinedByInvite extends WalkieTalkieEvent {
+  final String inviteId;
+
+  const WalkieGroupJoinedByInvite(this.inviteId);
+
+  @override
+  List<Object?> get props => [inviteId];
+}
+
 class WalkieGroupJoined extends WalkieTalkieEvent {
   final String groupId;
   const WalkieGroupJoined(this.groupId);
@@ -82,11 +91,24 @@ class WalkieOnlineUsersUpdated extends WalkieTalkieEvent {
 }
 
 class WalkieHistoryUpdated extends WalkieTalkieEvent {
-  final List<Map<String, dynamic>> history;
+  final List<dynamic> history;
   const WalkieHistoryUpdated(this.history);
-
   @override
   List<Object?> get props => [history];
+}
+
+class WalkieChatHistoryUpdated extends WalkieTalkieEvent {
+  final List<dynamic> chatHistory;
+  const WalkieChatHistoryUpdated(this.chatHistory);
+  @override
+  List<Object?> get props => [chatHistory];
+}
+
+class WalkieChatMessageReceived extends WalkieTalkieEvent {
+  final Map<String, dynamic> message;
+  const WalkieChatMessageReceived(this.message);
+  @override
+  List<Object?> get props => [message];
 }
 
 class WalkieTransmissionEnded extends WalkieTalkieEvent {
@@ -138,7 +160,8 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
   final TransmissionStatus status;
   final String? activeTransmitterName;
   final List<OnlineUserEntity> members;
-  final List<Map<String, dynamic>> history;
+  final List<dynamic> history;
+  final List<dynamic> chatHistory;
 
   const WalkieTalkieInChannel({
     required this.group,
@@ -146,6 +169,7 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
     this.activeTransmitterName,
     this.members = const [],
     this.history = const [],
+    this.chatHistory = const [],
   });
 
   WalkieTalkieInChannel copyWith({
@@ -153,7 +177,8 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
     TransmissionStatus? status,
     String? activeTransmitterName,
     List<OnlineUserEntity>? members,
-    List<Map<String, dynamic>>? history,
+    List<dynamic>? history,
+    List<dynamic>? chatHistory,
   }) {
     return WalkieTalkieInChannel(
       group: group ?? this.group,
@@ -161,11 +186,12 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
       activeTransmitterName: activeTransmitterName ?? this.activeTransmitterName,
       members: members ?? this.members,
       history: history ?? this.history,
+      chatHistory: chatHistory ?? this.chatHistory,
     );
   }
 
   @override
-  List<Object?> get props => [group, status, activeTransmitterName, members, history];
+  List<Object?> get props => [group, status, activeTransmitterName, members, history, chatHistory];
 }
 
 class WalkieTalkieFailure extends WalkieTalkieState {

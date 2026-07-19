@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/widgets/neumorphic_container.dart';
+import '../../../core/di/injection.dart';
+import '../services/walkie_repository.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,7 +17,8 @@ class _LoginScreenState extends State<LoginScreen> {
   void _login() {
     final name = _nameController.text.trim();
     if (name.isNotEmpty) {
-      // Pass the name to the dashboard
+      // Pass the name to the repository so other users see this name!
+      getIt<WalkieRepository>().setUserName(name);
       context.go('/walkie-talkie');
     }
   }

@@ -7,6 +7,8 @@ import '../bloc/walkie_talkie_bloc.dart';
 import '../bloc/walkie_talkie_event_state.dart';
 import '../models/walkie_group_entity.dart';
 import '../services/audio_capture_service.dart';
+import '../services/walkie_repository.dart';
+import '../services/walkie_signal_service.dart';
 
 class WalkieChannelScreen extends StatefulWidget {
   final WalkieGroupEntity group;
@@ -19,6 +21,106 @@ class WalkieChannelScreen extends StatefulWidget {
 class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTickerProviderStateMixin {
   late final WalkieTalkieBloc _bloc;
   late final AnimationController _waveController;
+
+  void _showChatSheet(BuildContext context, WalkieTalkieInChannel state) {
+    final textController = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.6,
+            child: Column(
+              children: [
+                const SizedBox(height: 16),
+                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.circular(2))),
+                const SizedBox(height: 16),
+                Text('CHANNEL CHAT', style: Theme.of(context).textTheme.titleMedium?.copyWith(letterSpacing: 2)),
+                const Divider(),
+                Expanded(
+                  child: BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
+                    bloc: _bloc,
+                    builder: (context, blocState) {
+                      if (blocState is WalkieTalkieInChannel) {
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: blocState.chatHistory.length,
+                          itemBuilder: (context, index) {
+                            final msg = blocState.chatHistory[index];
+                            final isMe = msg['senderId'] == getIt<WalkieRepository>().userId;
+                            return Align(
+                              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isMe ? Theme.of(context).primaryColor : Colors.grey[800],
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (!isMe) Text(msg['senderName'] ?? 'Unknown', style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                                    Text(msg['message'] ?? '', style: const TextStyle(color: Colors.white)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      }
+                      return const SizedBox();
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: textController,
+                          decoration: InputDecoration(
+                            hintText: 'Type a message...',
+                            filled: true,
+                            fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[900] : Colors.grey[200],
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          if (textController.text.trim().isNotEmpty) {
+                            getIt<WalkieSignalService>().sendChatMessage(
+                              state.group.id,
+                              getIt<WalkieRepository>().userName,
+                              getIt<WalkieRepository>().userId,
+                              textController.text.trim(),
+                            );
+                            textController.clear();
+                          }
+                        },
+                        child: CircleAvatar(
+                          backgroundColor: Theme.of(context).primaryColor,
+                          child: const Icon(Icons.send, color: Colors.white, size: 20),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -48,24 +150,30 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     GestureDetector(
-                      onTap: () => context.go('/walkie-talkie'),
+                      onTap: () => context.pop(),
                       child: const NeumorphicContainer(
                         width: 50,
                         height: 50,
                         shape: BoxShape.circle,
-                        child: Icon(Icons.menu),
+                        child: Icon(Icons.arrow_back),
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chat opened.')));
-                      },
-                      child: const NeumorphicContainer(
-                        width: 50,
-                        height: 50,
-                        shape: BoxShape.circle,
-                        child: Icon(Icons.chat_bubble_rounded, size: 20),
-                      ),
+                    BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
+                      builder: (context, state) {
+                        return GestureDetector(
+                          onTap: () {
+                            if (state is WalkieTalkieInChannel) {
+                              _showChatSheet(context, state);
+                            }
+                          },
+                          child: const NeumorphicContainer(
+                            width: 50,
+                            height: 50,
+                            shape: BoxShape.circle,
+                            child: Icon(Icons.chat_bubble_rounded, size: 20),
+                          ),
+                        );
+                      }
                     ),
                   ],
                 ),
@@ -74,35 +182,62 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
               // Active Contact Card
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: NeumorphicContainer(
-                  padding: const EdgeInsets.all(16),
-                  borderRadius: 20,
-                  child: Row(
-                    children: [
-                      const NeumorphicContainer(
-                        width: 60,
-                        height: 60,
-                        shape: BoxShape.circle,
-                        child: Icon(Icons.person, size: 30),
-                      ),
-                      const SizedBox(width: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.group.name,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 18),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Available',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[600],
-                            ),
+                child: GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        title: Text('CHANNEL MEMBERS (${widget.group.memberCount})'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: widget.group.permanentMembers.isEmpty 
+                            ? [const Text('No registered members yet.')]
+                            : widget.group.permanentMembers.map((m) => ListTile(
+                                leading: const Icon(Icons.person),
+                                title: Text(m), // We don't have their names easily accessible yet, so ID is shown, or backend can provide full objects.
+                              )).toList(),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => context.pop(),
+                            child: const Text('CLOSE'),
                           ),
                         ],
                       ),
-                    ],
+                    );
+                  },
+                  child: NeumorphicContainer(
+                    padding: const EdgeInsets.all(16),
+                    borderRadius: 20,
+                    child: Row(
+                      children: [
+                        const NeumorphicContainer(
+                          width: 60,
+                          height: 60,
+                          shape: BoxShape.circle,
+                          child: Icon(Icons.person, size: 30),
+                        ),
+                        const SizedBox(width: 16),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.group.name,
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 18),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tap to view members',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

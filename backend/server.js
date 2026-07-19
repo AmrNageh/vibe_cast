@@ -206,6 +206,16 @@ io.on('connection', (socket) => {
     leaveGroup(socket, groupId);
   });
 
+  socket.on('walkie:audio', (data) => {
+    // data should contain { groupId, senderId, audioBlob }
+    const { groupId, senderId, audioBlob } = data;
+    // Broadcast to everyone else in the group
+    socket.to(groupId).emit('walkie:audio', {
+      senderId: senderId || socket.id,
+      audioBlob: audioBlob
+    });
+  });
+
   socket.on('disconnect', () => {
     if (socket.groupId) {
       leaveGroup(socket, socket.groupId);

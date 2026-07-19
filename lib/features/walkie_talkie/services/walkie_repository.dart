@@ -1,18 +1,21 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/walkie_group_entity.dart';
 
 @lazySingleton
 class WalkieRepository {
   final Dio _dio;
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
   
   String? _token;
-  late final String userId;
-  late final String userName;
+  String userId = '';
+  String userName = 'Unknown Node';
+  bool isInitialized = false;
 
   WalkieRepository() : _dio = Dio(BaseOptions(
-    baseUrl: 'http://192.168.1.6:4000/api',
+    baseUrl: 'https://vibe2-hxn784go.b4a.run/api',
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
   )) {
@@ -24,9 +27,27 @@ class WalkieRepository {
         return handler.next(options);
       },
     ));
-    // Generate an anonymous user for the standalone VibeCast backend
-    userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
-    userName = 'Agent-${userId.substring(userId.length - 4)}';
+  }
+
+  Future<void> initIdentity() async {
+    if (isInitialized) return;
+    String? storedId = await _storage.read(key: 'walkie_user_id');
+    String? storedName = await _storage.read(key: 'walkie_user_name');
+
+    if (storedId != null && storedId.isNotEmpty) {
+      userId = storedId;
+      userName = storedName ?? 'Unknown Node';
+    } else {
+      userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+      userName = 'Unknown Node';
+      await _storage.write(key: 'walkie_user_id', value: userId);
+    }
+    isInitialized = true;
+  }
+
+  Future<void> setUserName(String name) async {
+    userName = name;
+    await _storage.write(key: 'walkie_user_name', value: name);
   }
 
   Future<void> login(String email, String password) async {
@@ -46,14 +67,10 @@ class WalkieRepository {
 
   Future<List<WalkieGroupEntity>> getGroups() async {
     try {
-      final response = await _dio.get('/walkie/groups');
+      final response = await _dio.get('/walkie/groups', queryParameters: {'userId': userId});
       final List<dynamic> data = response.data['data'] ?? response.data;
       
-      return data.map((json) => WalkieGroupEntity(
-        id: json['_id'] ?? json['id'] ?? '',
-        name: json['name'] ?? 'Unknown Group',
-        memberCount: (json['members'] as List?)?.length ?? 0,
-      )).toList();
+      return data.map((json) => WalkieGroupEntity.fromJson(json)).toList();
     } catch (e) {
       throw Exception('Failed to fetch groups: $e');
     }
@@ -64,15 +81,25 @@ class WalkieRepository {
       final response = await _dio.post('/walkie/groups', data: {
         'name': name,
         'description': description,
+        'userId': userId,
       });
       final json = response.data['data'];
-      return WalkieGroupEntity(
-        id: json['id'] ?? '',
-        name: json['name'] ?? 'Unknown Group',
-        memberCount: 0,
-      );
+      return WalkieGroupEntity.fromJson(json);
     } catch (e) {
       throw Exception('Failed to create group: $e');
+    }
+  }
+
+  Future<WalkieGroupEntity> joinGroupFromInvite(String groupId) async {
+    try {
+      final response = await _dio.post('/walkie/groups/join', data: {
+        'groupId': groupId,
+        'userId': userId,
+      });
+      final json = response.data['data'];
+      return WalkieGroupEntity.fromJson(json);
+    } catch (e) {
+      throw Exception('Failed to join group: $e');
     }
   }
 }
