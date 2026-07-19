@@ -171,7 +171,7 @@ function leaveGroup(socket, groupId) {
   socket.leave(groupId);
 }
 
-const PORT = 4000;
+const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`VibeCast Separate Backend running on port ${PORT}`);
 });
