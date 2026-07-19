@@ -214,25 +214,38 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                   onTap: () {
                     showDialog(
                       context: context,
-                      builder: (context) => AlertDialog(
-                        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        title: Text('CHANNEL MEMBERS (${widget.group.memberCount})'),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: widget.group.permanentMembers.isEmpty 
-                            ? [const Text('No registered members yet.')]
-                            : widget.group.permanentMembers.map((m) => ListTile(
-                                leading: const Icon(Icons.person),
-                                title: Text(m), // We don't have their names easily accessible yet, so ID is shown, or backend can provide full objects.
-                              )).toList(),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => context.pop(),
-                            child: const Text('CLOSE'),
-                          ),
-                        ],
+                      builder: (context) => BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
+                        bloc: _bloc,
+                        builder: (context, state) {
+                          List<String> members = widget.group.permanentMembers;
+                          int onlineCount = 0;
+                          if (state is WalkieTalkieInChannel) {
+                            onlineCount = state.members.length;
+                            if (state.members.isNotEmpty) {
+                              members = state.members.map((m) => '${m.name} (Online)').toList();
+                            }
+                          }
+                          return AlertDialog(
+                            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            title: Text('CHANNEL MEMBERS ($onlineCount Online)'),
+                            content: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: members.isEmpty 
+                                ? [const Text('No registered members yet.')]
+                                : members.map((m) => ListTile(
+                                    leading: Icon(Icons.person, color: m.contains('(Online)') ? Colors.green : Colors.grey),
+                                    title: Text(m),
+                                  )).toList(),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => context.pop(),
+                                child: const Text('CLOSE'),
+                              ),
+                            ],
+                          );
+                        }
                       ),
                     );
                   },

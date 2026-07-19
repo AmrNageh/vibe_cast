@@ -43,7 +43,8 @@ app.get('/api/walkie/groups', (req, res) => {
       name: g.name,
       description: g.description,
       onlineCount: g.activeMembers.length,
-      ownerId: g.ownerId
+      ownerId: g.ownerId,
+      permanentMembers: g.permanentMembers
     }))
   });
 });

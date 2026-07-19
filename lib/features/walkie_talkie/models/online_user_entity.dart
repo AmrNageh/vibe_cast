@@ -11,11 +11,11 @@ class OnlineUserEntity extends Equatable {
     required this.isOnline,
   });
 
-  factory OnlineUserEntity.fromJson(Map<String, dynamic> json) {
+  factory OnlineUserEntity.fromJson(Map<dynamic, dynamic> json) {
     return OnlineUserEntity(
-      id: json['id'] ?? '',
+      id: json['userId'] ?? json['socketId'] ?? json['id'] ?? '',
       name: json['name'] ?? '',
-      isOnline: json['isOnline'] ?? false,
+      isOnline: json['isOnline'] ?? true, // If they are in the list, they are online
     );
   }
 
