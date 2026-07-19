@@ -16,59 +16,89 @@ app.use(cors());
 app.use(express.json());
 
 // In-memory data store
-const groups = [
-  { id: 'dev-team', name: 'Dev Team', description: 'Engineering channel', members: [] },
-  { id: 'general', name: 'General', description: 'Company wide channel', members: [] },
-  { id: 'emergency', name: 'Emergency', description: 'Priority communications', members: [] },
-];
+// A group now has: id, name, description, ownerId, permanentMembers (array of userIds), activeMembers (array of socket users)
+const groups = [];
 
 const MAX_GROUP_SIZE = 20;
 
-// History logs per group
-const historyLogs = {
-  'dev-team': [],
-  'general': [],
-  'emergency': []
-};
+// History logs per group (Voice logs)
+const historyLogs = {};
+// Chat messages per group
+const chatLogs = {};
 
-// API Endpoint to get groups
+// API Endpoint to get groups for a specific user
 app.get('/api/walkie/groups', (req, res) => {
+  const userId = req.query.userId;
+  if (!userId) {
+    return res.status(400).json({ success: false, message: 'userId is required to fetch groups' });
+  }
+
+  // Find groups where the user is a permanent member
+  const userGroups = groups.filter(g => g.permanentMembers.includes(userId));
+
   res.json({
     success: true,
-    data: groups.map(g => ({
+    data: userGroups.map(g => ({
       id: g.id,
       name: g.name,
       description: g.description,
-      onlineCount: g.members.length
+      onlineCount: g.activeMembers.length,
+      ownerId: g.ownerId
     }))
   });
 });
 
+// Create a new group
 app.post('/api/walkie/groups', (req, res) => {
-  const { name, description } = req.body;
-  if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
+  const { name, description, userId } = req.body;
+  if (!name || !userId) return res.status(400).json({ success: false, message: 'Name and userId are required' });
   
   const newGroup = {
-    id: name.toLowerCase().replace(/ /g, '-'),
+    id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5), // Unique ID for invite link
     name,
     description: description || '',
-    members: []
+    ownerId: userId,
+    permanentMembers: [userId],
+    activeMembers: []
   };
   
-  // Prevent duplicates
-  if (!groups.find(g => g.id === newGroup.id)) {
-    groups.push(newGroup);
-    historyLogs[newGroup.id] = [];
-  }
+  groups.push(newGroup);
+  historyLogs[newGroup.id] = [];
+  chatLogs[newGroup.id] = [];
   
   res.json({ success: true, data: newGroup });
 });
 
+// Join a group via invite link (groupId)
+app.post('/api/walkie/groups/join', (req, res) => {
+  const { groupId, userId } = req.body;
+  if (!groupId || !userId) return res.status(400).json({ success: false, message: 'groupId and userId are required' });
+
+  const group = groups.find(g => g.id === groupId);
+  if (!group) return res.status(404).json({ success: false, message: 'Group not found or invalid invite link' });
+
+  if (!group.permanentMembers.includes(userId)) {
+    group.permanentMembers.push(userId);
+  }
+
+  res.json({ success: true, data: group });
+});
+
+// Get voice history
 app.get('/api/walkie/groups/:groupId/history', (req, res) => {
   const { groupId } = req.params;
   res.json({
     success: true,
     data: historyLogs[groupId] || []
+  });
+});
+
+// Get chat history
+app.get('/api/walkie/groups/:groupId/chat', (req, res) => {
+  const { groupId } = req.params;
+  res.json({
+    success: true,
+    data: chatLogs[groupId] || []
   });
 });
 
@@ -81,24 +111,48 @@ io.on('connection', (socket) => {
     const group = groups.find(g => g.id === groupId);
     if (!group) return;
 
-    if (group.members.length >= MAX_GROUP_SIZE) {
+    if (group.activeMembers.length >= MAX_GROUP_SIZE) {
       socket.emit('walkie:error', { message: 'Group is full (Max 20 members).' });
       return;
     }
 
-    // Add user to group
+    // Auto-add to permanent members if not already (safeguard)
+    if (userId && !group.permanentMembers.includes(userId)) {
+      group.permanentMembers.push(userId);
+    }
+
+    // Add user to active members
     const user = { socketId: socket.id, userId: userId || socket.id, name: userName || 'Anonymous', udpIp: localIp, udpPort };
-    group.members.push(user);
+    group.activeMembers.push(user);
     socket.join(groupId);
     socket.groupId = groupId; // Store for disconnect
 
     console.log(`${user.name} joined ${groupId}`);
 
     // Broadcast updated users
-    io.to(groupId).emit('walkie:online_users', group.members);
+    io.to(groupId).emit('walkie:online_users', group.activeMembers);
     
-    // Send current history
+    // Send current histories
     socket.emit('walkie:history', historyLogs[groupId] || []);
+    socket.emit('walkie:chat_history', chatLogs[groupId] || []);
+  });
+
+  socket.on('walkie:chat_message', (data) => {
+    const { groupId, senderId, senderName, message } = data;
+    
+    const chatEntry = {
+      id: Date.now().toString(),
+      senderId: senderId || socket.id,
+      senderName: senderName || 'Unknown',
+      message: message,
+      timestamp: new Date().toISOString()
+    };
+
+    if (!chatLogs[groupId]) chatLogs[groupId] = [];
+    chatLogs[groupId].push(chatEntry);
+    if (chatLogs[groupId].length > 100) chatLogs[groupId].shift(); // keep last 100 messages
+
+    io.to(groupId).emit('walkie:chat_message', chatEntry);
   });
 
   socket.on('walkie:ptt_start', (data) => {
@@ -113,17 +167,16 @@ io.on('connection', (socket) => {
       action: 'started speaking'
     };
     
-    if (historyLogs[groupId]) {
-      historyLogs[groupId].push(logEntry);
-      if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); // keep last 50
-    }
+    if (!historyLogs[groupId]) historyLogs[groupId] = [];
+    historyLogs[groupId].push(logEntry);
+    if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
 
     io.to(groupId).emit('walkie:ptt_start', {
       senderId: senderId || socket.id,
       senderName,
     });
     
-    io.to(groupId).emit('walkie:history', historyLogs[groupId] || []);
+    io.to(groupId).emit('walkie:history', historyLogs[groupId]);
   });
 
   socket.on('walkie:ptt_stop', (data) => {
@@ -137,16 +190,15 @@ io.on('connection', (socket) => {
       action: 'stopped speaking'
     };
     
-    if (historyLogs[groupId]) {
-      historyLogs[groupId].push(logEntry);
-      if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); // keep last 50
-    }
+    if (!historyLogs[groupId]) historyLogs[groupId] = [];
+    historyLogs[groupId].push(logEntry);
+    if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
 
     io.to(groupId).emit('walkie:ptt_stop', {
       senderId: senderId || socket.id,
     });
     
-    io.to(groupId).emit('walkie:history', historyLogs[groupId] || []);
+    io.to(groupId).emit('walkie:history', historyLogs[groupId]);
   });
 
   socket.on('walkie:leave', (data) => {
@@ -165,8 +217,8 @@ io.on('connection', (socket) => {
 function leaveGroup(socket, groupId) {
   const group = groups.find(g => g.id === groupId);
   if (group) {
-    group.members = group.members.filter(m => m.socketId !== socket.id);
-    io.to(groupId).emit('walkie:online_users', group.members);
+    group.activeMembers = group.activeMembers.filter(m => m.socketId !== socket.id);
+    io.to(groupId).emit('walkie:online_users', group.activeMembers);
   }
   socket.leave(groupId);
 }
