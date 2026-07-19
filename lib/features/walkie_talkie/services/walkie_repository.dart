@@ -15,7 +15,7 @@ class WalkieRepository {
   bool isInitialized = false;
 
   WalkieRepository() : _dio = Dio(BaseOptions(
-    baseUrl: 'https://vibe2-hxn784go.b4a.run/api',
+    baseUrl: 'https://vibe2-hxn784go.b4a.run',
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
   )) {
@@ -52,7 +52,7 @@ class WalkieRepository {
 
   Future<void> login(String email, String password) async {
     try {
-      final response = await _dio.post('/auth/login', data: {
+      final response = await _dio.post('/api/auth/login', data: {
         'email': email,
         'password': password,
       });
@@ -67,7 +67,7 @@ class WalkieRepository {
 
   Future<List<WalkieGroupEntity>> getGroups() async {
     try {
-      final response = await _dio.get('/walkie/groups', queryParameters: {'userId': userId});
+      final response = await _dio.get('/api/walkie/groups', queryParameters: {'userId': userId});
       final List<dynamic> data = response.data['data'] ?? response.data;
       
       return data.map((json) => WalkieGroupEntity.fromJson(json)).toList();
@@ -78,7 +78,7 @@ class WalkieRepository {
 
   Future<WalkieGroupEntity> createGroup(String name, String description) async {
     try {
-      final response = await _dio.post('/walkie/groups', data: {
+      final response = await _dio.post('/api/walkie/groups', data: {
         'name': name,
         'description': description,
         'userId': userId,
@@ -92,7 +92,7 @@ class WalkieRepository {
 
   Future<WalkieGroupEntity> joinGroupFromInvite(String groupId) async {
     try {
-      final response = await _dio.post('/walkie/groups/join', data: {
+      final response = await _dio.post('/api/walkie/groups/join', data: {
         'groupId': groupId,
         'userId': userId,
       });
