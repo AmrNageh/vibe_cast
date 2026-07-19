@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import '../models/walkie_group_entity.dart';
 import '../models/online_user_entity.dart';
+import '../models/chat_message_entity.dart';
 
 abstract class WalkieTalkieEvent extends Equatable {
   const WalkieTalkieEvent();
@@ -98,14 +99,14 @@ class WalkieHistoryUpdated extends WalkieTalkieEvent {
 }
 
 class WalkieChatHistoryUpdated extends WalkieTalkieEvent {
-  final List<dynamic> chatHistory;
+  final List<ChatMessageEntity> chatHistory;
   const WalkieChatHistoryUpdated(this.chatHistory);
   @override
   List<Object?> get props => [chatHistory];
 }
 
 class WalkieChatMessageReceived extends WalkieTalkieEvent {
-  final Map<String, dynamic> message;
+  final ChatMessageEntity message;
   const WalkieChatMessageReceived(this.message);
   @override
   List<Object?> get props => [message];
@@ -161,7 +162,7 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
   final String? activeTransmitterName;
   final List<OnlineUserEntity> members;
   final List<dynamic> history;
-  final List<dynamic> chatHistory;
+  final List<ChatMessageEntity> chatHistory;
 
   const WalkieTalkieInChannel({
     required this.group,
@@ -176,14 +177,15 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
     WalkieGroupEntity? group,
     TransmissionStatus? status,
     String? activeTransmitterName,
+    bool clearTransmitter = false,
     List<OnlineUserEntity>? members,
     List<dynamic>? history,
-    List<dynamic>? chatHistory,
+    List<ChatMessageEntity>? chatHistory,
   }) {
     return WalkieTalkieInChannel(
       group: group ?? this.group,
       status: status ?? this.status,
-      activeTransmitterName: activeTransmitterName ?? this.activeTransmitterName,
+      activeTransmitterName: clearTransmitter ? null : (activeTransmitterName ?? this.activeTransmitterName),
       members: members ?? this.members,
       history: history ?? this.history,
       chatHistory: chatHistory ?? this.chatHistory,

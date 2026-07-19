@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/di/injection.dart';
@@ -51,7 +52,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                           itemCount: blocState.chatHistory.length,
                           itemBuilder: (context, index) {
                             final msg = blocState.chatHistory[index];
-                            final isMe = msg['senderId'] == getIt<WalkieRepository>().userId;
+                            final isMe = msg.senderId == getIt<WalkieRepository>().userId;
                             return Align(
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: Container(
@@ -64,8 +65,8 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (!isMe) Text(msg['senderName'] ?? 'Unknown', style: const TextStyle(fontSize: 10, color: Colors.white70)),
-                                    Text(msg['message'] ?? '', style: const TextStyle(color: Colors.white)),
+                                    if (!isMe) Text(msg.senderName, style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                                    Text(msg.text, style: const TextStyle(color: Colors.white)),
                                   ],
                                 ),
                               ),
@@ -139,45 +140,72 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
   Widget build(BuildContext context) {
     return BlocProvider.value(
       value: _bloc,
-      child: Scaffold(
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Top Bar
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    GestureDetector(
-                      onTap: () => context.pop(),
-                      child: const NeumorphicContainer(
-                        width: 50,
-                        height: 50,
-                        shape: BoxShape.circle,
-                        child: Icon(Icons.arrow_back),
+      child: PopScope(
+        canPop: true,
+        onPopInvokedWithResult: (didPop, _) {
+          _bloc.add(WalkieGroupLeft(widget.group.id));
+        },
+        child: Scaffold(
+          body: SafeArea(
+            child: Column(
+              children: [
+                // Top Bar
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          _bloc.add(WalkieGroupLeft(widget.group.id));
+                          context.pop();
+                        },
+                        child: const NeumorphicContainer(
+                          width: 50,
+                          height: 50,
+                          shape: BoxShape.circle,
+                          child: Icon(Icons.arrow_back),
+                        ),
                       ),
-                    ),
-                    BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
-                      builder: (context, state) {
-                        return GestureDetector(
-                          onTap: () {
-                            if (state is WalkieTalkieInChannel) {
-                              _showChatSheet(context, state);
-                            }
-                          },
-                          child: const NeumorphicContainer(
-                            width: 50,
-                            height: 50,
-                            shape: BoxShape.circle,
-                            child: Icon(Icons.chat_bubble_rounded, size: 20),
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              Clipboard.setData(ClipboardData(text: widget.group.id));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Invite Code Copied!')),
+                              );
+                            },
+                            child: const NeumorphicContainer(
+                              width: 50,
+                              height: 50,
+                              shape: BoxShape.circle,
+                              child: Icon(Icons.copy, size: 20),
+                            ),
                           ),
-                        );
-                      }
-                    ),
-                  ],
+                          const SizedBox(width: 16),
+                          BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
+                            builder: (context, state) {
+                              return GestureDetector(
+                                onTap: () {
+                                  if (state is WalkieTalkieInChannel) {
+                                    _showChatSheet(context, state);
+                                  }
+                                },
+                                child: const NeumorphicContainer(
+                                  width: 50,
+                                  height: 50,
+                                  shape: BoxShape.circle,
+                                  child: Icon(Icons.chat_bubble_rounded, size: 20),
+                                ),
+                              );
+                            }
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
               // Active Contact Card
               Padding(
@@ -395,6 +423,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
               ),
               const SizedBox(height: 20),
             ],
+          ),
           ),
         ),
       ),

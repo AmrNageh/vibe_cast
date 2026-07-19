@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/di/injection.dart';
+import '../services/walkie_repository.dart';
 import '../../../core/widgets/neumorphic_container.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -13,11 +15,29 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
+    _initApp();
+  }
+
+  Future<void> _initApp() async {
+    final startTime = DateTime.now();
+    
+    // Initialize identity
+    final repo = getIt<WalkieRepository>();
+    await repo.initIdentity();
+
+    // Ensure at least 1 second of splash screen
+    final elapsed = DateTime.now().difference(startTime);
+    if (elapsed.inMilliseconds < 1000) {
+      await Future.delayed(Duration(milliseconds: 1000 - elapsed.inMilliseconds));
+    }
+
+    if (mounted) {
+      if (repo.userName != 'Unknown Node') {
+        context.go('/walkie-talkie');
+      } else {
         context.go('/login');
       }
-    });
+    }
   }
 
   @override

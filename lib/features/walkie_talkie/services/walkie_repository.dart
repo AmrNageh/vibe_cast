@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../../core/config/app_config.dart';
 import '../models/walkie_group_entity.dart';
 
 @lazySingleton
@@ -10,12 +11,15 @@ class WalkieRepository {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   
   String? _token;
-  String userId = '';
-  String userName = 'Unknown Node';
+  String _userId = '';
+  String _userName = 'Unknown Node';
   bool isInitialized = false;
 
+  String get userId => _userId;
+  String get userName => _userName;
+
   WalkieRepository() : _dio = Dio(BaseOptions(
-    baseUrl: 'https://vibe2-hxn784go.b4a.run',
+    baseUrl: AppConfig.serverUrl,
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
   )) {
@@ -35,18 +39,18 @@ class WalkieRepository {
     String? storedName = await _storage.read(key: 'walkie_user_name');
 
     if (storedId != null && storedId.isNotEmpty) {
-      userId = storedId;
-      userName = storedName ?? 'Unknown Node';
+      _userId = storedId;
+      _userName = storedName ?? 'Unknown Node';
     } else {
-      userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
-      userName = 'Unknown Node';
-      await _storage.write(key: 'walkie_user_id', value: userId);
+      _userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+      _userName = 'Unknown Node';
+      await _storage.write(key: 'walkie_user_id', value: _userId);
     }
     isInitialized = true;
   }
 
   Future<void> setUserName(String name) async {
-    userName = name;
+    _userName = name;
     await _storage.write(key: 'walkie_user_name', value: name);
   }
 
@@ -57,8 +61,8 @@ class WalkieRepository {
         'password': password,
       });
       _token = response.data['accessToken'];
-      userId = response.data['user']['id'];
-      userName = response.data['user']['name'];
+      _userId = response.data['user']['id'];
+      _userName = response.data['user']['name'];
     } catch (e) {
       debugPrint('WalkieRepository login error: $e');
       // If login fails, we might still try to fetch if backend allows it

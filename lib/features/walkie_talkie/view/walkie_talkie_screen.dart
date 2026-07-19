@@ -196,7 +196,22 @@ class _WalkieTalkieScreenState extends State<WalkieTalkieScreen> {
                     if (state is WalkieTalkieLoading || state is WalkieTalkieInitial) {
                       return Center(child: CircularProgressIndicator(color: Theme.of(context).primaryColor));
                     } else if (state is WalkieTalkieFailure) {
-                      return Center(child: Text(state.message, style: const TextStyle(color: Colors.red)));
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                            const SizedBox(height: 16),
+                            Text(state.message, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
+                            const SizedBox(height: 24),
+                            ElevatedButton(
+                              onPressed: () => _bloc.add(WalkieInitialized()),
+                              style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
+                              child: const Text('RETRY'),
+                            ),
+                          ],
+                        ),
+                      );
                     } else if (state is WalkieTalkieGroupsLoaded) {
                       if (state.groups.isEmpty) {
                         return Center(

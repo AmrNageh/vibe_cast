@@ -2,34 +2,38 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:injectable/injectable.dart';
+import '../../../core/config/app_config.dart';
 import 'walkie_talkie_event_state.dart';
 import '../services/audio_capture_service.dart';
 import '../services/audio_playback_service.dart';
-import '../services/udp_transport_service.dart';
 import '../services/walkie_signal_service.dart';
 import '../services/walkie_repository.dart';
 import '../models/online_user_entity.dart';
+import '../models/chat_message_entity.dart';
 
 @lazySingleton
 class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   final AudioCaptureService _audioCaptureService;
   final AudioPlaybackService _audioPlaybackService;
-  final UdpTransportService _udpTransportService;
   final WalkieSignalService _walkieSignalService;
   final WalkieRepository _walkieRepository;
-
   StreamSubscription? _audioCaptureSub;
-  StreamSubscription? _udpAudioSub;
   StreamSubscription? _pttSignalSub;
+  StreamSubscription? _onlineUsersSub;
+  StreamSubscription? _historySub;
+  StreamSubscription? _chatHistorySub;
+  StreamSubscription? _chatSub;
+  StreamSubscription? _errorSub;
 
   WalkieTalkieBloc(
     this._audioCaptureService,
     this._audioPlaybackService,
-    this._udpTransportService,
     this._walkieSignalService,
     this._walkieRepository,
   ) : super(WalkieTalkieInitial()) {
     on<WalkieInitialized>(_onInitialized);
+    on<WalkieGroupJoined>( (e, emit) {} ); // Not used yet
+    on<WalkieGroupLeft>(_onGroupLeft);
     on<WalkieChannelEntered>(_onChannelEntered);
     on<WalkieOnlineUsersUpdated>(_onOnlineUsersUpdated);
     on<WalkiePTTPressed>(_onPTTPressed);
@@ -47,10 +51,10 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   Future<void> _onInitialized(WalkieInitialized event, Emitter<WalkieTalkieState> emit) async {
     emit(WalkieTalkieLoading());
     try {
-      await _udpTransportService.initialize();
       // Connect to the signaling server
-      _walkieSignalService.connect('https://vibe2-hxn784go.b4a.run');
+      _walkieSignalService.connect(AppConfig.serverUrl);
       
+      _pttSignalSub?.cancel();
       _pttSignalSub = _walkieSignalService.pttStream.listen((data) {
         if (data['type'] == 'start') {
           add(WalkieIncomingTransmission(
@@ -63,21 +67,31 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
           add(WalkieTransmissionEnded(data['senderId'] ?? ''));
         }
       });
-      _walkieSignalService.onlineUsersStream.listen((data) {
+
+      _onlineUsersSub?.cancel();
+      _onlineUsersSub = _walkieSignalService.onlineUsersStream.listen((data) {
         final onlineUsers = data.map((u) => OnlineUserEntity.fromJson(u)).toList();
         add(WalkieOnlineUsersUpdated(onlineUsers));
       });
-      _walkieSignalService.historyStream.listen((data) {
+
+      _historySub?.cancel();
+      _historySub = _walkieSignalService.historyStream.listen((data) {
         add(WalkieHistoryUpdated(data));
       });
-      _walkieSignalService.chatHistoryStream.listen((data) {
-        add(WalkieChatHistoryUpdated(data));
+
+      _chatHistorySub?.cancel();
+      _chatHistorySub = _walkieSignalService.chatHistoryStream.listen((data) {
+        final messages = data.map((m) => ChatMessageEntity.fromJson(m)).toList();
+        add(WalkieChatHistoryUpdated(messages));
       });
-      _walkieSignalService.chatStream.listen((data) {
-        add(WalkieChatMessageReceived(data));
+
+      _chatSub?.cancel();
+      _chatSub = _walkieSignalService.chatStream.listen((data) {
+        add(WalkieChatMessageReceived(ChatMessageEntity.fromJson(data)));
       });
-      _walkieSignalService.errorStream.listen((errorMsg) {
-        // Just emit failure if error happens (like group full)
+
+      _errorSub?.cancel();
+      _errorSub = _walkieSignalService.errorStream.listen((errorMsg) {
         emit(WalkieTalkieFailure(errorMsg));
       });
 
@@ -98,8 +112,19 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
       }
     } catch (_) {}
 
-    _walkieSignalService.joinGroup(event.group.id, _udpTransportService.localPort ?? 0, localIp, _walkieRepository.userName, _walkieRepository.userId);
+    _walkieSignalService.joinGroup(event.group.id, 0, localIp, _walkieRepository.userName, _walkieRepository.userId);
     emit(WalkieTalkieInChannel(group: event.group));
+  }
+
+  Future<void> _onGroupLeft(WalkieGroupLeft event, Emitter<WalkieTalkieState> emit) async {
+    _walkieSignalService.leaveGroup(event.groupId);
+    try {
+      final groups = await _walkieRepository.getGroups();
+      emit(WalkieTalkieGroupsLoaded(groups: groups, onlineUsers: const []));
+    } catch (_) {
+      // Just emit empty if it fails
+      emit(const WalkieTalkieGroupsLoaded(groups: [], onlineUsers: []));
+    }
   }
 
   Future<void> _onPTTPressed(WalkiePTTPressed event, Emitter<WalkieTalkieState> emit) async {
@@ -119,7 +144,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   Future<void> _onPTTReleased(WalkiePTTReleased event, Emitter<WalkieTalkieState> emit) async {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.transmitting) {
-      emit(currentState.copyWith(status: TransmissionStatus.idle, activeTransmitterName: null));
+      emit(currentState.copyWith(status: TransmissionStatus.idle, clearTransmitter: true));
       
       await _audioCaptureService.stop();
       await _audioCaptureSub?.cancel();
@@ -142,7 +167,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   void _onTransmissionEnded(WalkieTransmissionEnded event, Emitter<WalkieTalkieState> emit) {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.receiving) {
-      emit(currentState.copyWith(status: TransmissionStatus.idle, activeTransmitterName: null));
+      emit(currentState.copyWith(status: TransmissionStatus.idle, clearTransmitter: true));
       _audioPlaybackService.stop();
     }
   }
@@ -176,7 +201,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   void _onChatMessageReceived(WalkieChatMessageReceived event, Emitter<WalkieTalkieState> emit) {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel) {
-      final updatedHistory = List<dynamic>.from(currentState.chatHistory)..add(event.message);
+      final updatedHistory = List<ChatMessageEntity>.from(currentState.chatHistory)..add(event.message);
       emit(currentState.copyWith(chatHistory: updatedHistory));
     }
   }
@@ -229,8 +254,12 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   @override
   Future<void> close() {
     _audioCaptureSub?.cancel();
-    _udpAudioSub?.cancel();
     _pttSignalSub?.cancel();
+    _onlineUsersSub?.cancel();
+    _historySub?.cancel();
+    _chatHistorySub?.cancel();
+    _chatSub?.cancel();
+    _errorSub?.cancel();
     return super.close();
   }
 }

@@ -20,8 +20,8 @@ class AudioCaptureService {
 
   Future<void> start() async {
     if (await _audioRecorder.hasPermission()) {
-      final stream = await _audioRecorder.startStream(RecordConfig(
-        encoder: useOpus ? AudioEncoder.opus : AudioEncoder.pcm16bits,
+      final stream = await _audioRecorder.startStream(const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
         sampleRate: 16000,
         numChannels: 1,
       ));

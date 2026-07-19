@@ -107,4 +107,15 @@ class WalkieSignalService {
     _socket?.dispose();
     _socket = null;
   }
+
+  void dispose() {
+    disconnect();
+    _pttController.close();
+    _onlineUsersController.close();
+    _historyController.close();
+    _errorController.close();
+    _chatController.close();
+    _chatHistoryController.close();
+    _audioController.close();
+  }
 }

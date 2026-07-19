@@ -14,6 +14,15 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
 
+  @override
+  void initState() {
+    super.initState();
+    final repo = getIt<WalkieRepository>();
+    if (repo.userName != 'Unknown Node' && repo.userName.isNotEmpty) {
+      _nameController.text = repo.userName;
+    }
+  }
+
   void _login() {
     final name = _nameController.text.trim();
     if (name.isNotEmpty) {
