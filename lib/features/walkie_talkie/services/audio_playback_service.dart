@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:audio_session/audio_session.dart';
 
 @lazySingleton
 class AudioPlaybackService {
@@ -11,6 +12,23 @@ class AudioPlaybackService {
 
   Future<void> init() async {
     if (_isInitialized) return;
+
+    final session = await AudioSession.instance;
+    await session.configure(AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+      avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker | AVAudioSessionCategoryOptions.mixWithOthers,
+      avAudioSessionMode: AVAudioSessionMode.videoChat,
+      avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+      androidAudioAttributes: AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.speech,
+        flags: AndroidAudioFlags.none,
+        usage: AndroidAudioUsage.voiceCommunication,
+      ),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransientExclusive,
+      androidWillPauseWhenDucked: true,
+    ));
+
     _player = FlutterSoundPlayer();
     await _player!.openPlayer();
     _isInitialized = true;
@@ -50,6 +68,10 @@ class AudioPlaybackService {
   Future<void> stop() async {
     await _subscription?.cancel();
     _subscription = null;
+    
+    // Allow the PCM buffer to drain so the last word isn't cut off
+    await Future.delayed(const Duration(milliseconds: 300));
+
     if (_player != null && !_player!.isStopped) {
       await _player!.stopPlayer();
     }

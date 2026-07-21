@@ -132,12 +132,26 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
       emit(currentState.copyWith(status: TransmissionStatus.transmitting, activeTransmitterName: 'Me'));
       
-      await _audioCaptureService.start();
-      _audioCaptureSub = _audioCaptureService.audioStream.listen((data) {
-        _walkieSignalService.sendAudio(currentState.group.id, _walkieRepository.userId, data);
-      });
-
+      // 1. Alert network we are taking the floor
       _walkieSignalService.startPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
+      
+      // 2. Wait for network latency to allow receivers to open their AudioPlaybackService buffers
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // 2.5 Abort if user released PTT during the latency delay
+      if (state is WalkieTalkieInChannel && (state as WalkieTalkieInChannel).status == TransmissionStatus.transmitting) {
+        // 3. Start capturing and broadcasting audio
+        await _audioCaptureService.start();
+        
+        // 3.5 Final check in case release happened exactly during capture service initialization
+        if (state is WalkieTalkieInChannel && (state as WalkieTalkieInChannel).status == TransmissionStatus.transmitting) {
+          _audioCaptureSub = _audioCaptureService.audioStream.listen((data) {
+            _walkieSignalService.sendAudio(currentState.group.id, _walkieRepository.userId, data);
+          });
+        } else {
+          await _audioCaptureService.stop();
+        }
+      }
     }
   }
 

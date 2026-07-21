@@ -24,6 +24,8 @@ class WalkieSignalService {
   Stream<List<dynamic>> get chatHistoryStream => _chatHistoryController.stream;
   Stream<Uint8List> get audioStream => _audioController.stream;
 
+  Map<String, dynamic>? _lastJoinArgs;
+
   void connect(String serverUrl) {
     _socket = io.io(serverUrl, io.OptionBuilder()
         .setTransports(['websocket'])
@@ -32,6 +34,9 @@ class WalkieSignalService {
 
     _socket?.onConnect((_) {
       debugPrint('WalkieSignalService connected');
+      if (_lastJoinArgs != null) {
+        _socket?.emit('walkie:join', _lastJoinArgs);
+      }
     });
 
     _socket?.on('walkie:ptt_start', (data) => _pttController.add({'type': 'start', ...data}));
@@ -68,16 +73,18 @@ class WalkieSignalService {
   }
 
   void joinGroup(String groupId, int udpPort, String localIp, String? userName, String? userId) {
-    _socket?.emit('walkie:join', {
+    _lastJoinArgs = {
       'groupId': groupId,
       'udpPort': udpPort,
       'localIp': localIp,
       'userName': userName,
       'userId': userId,
-    });
+    };
+    _socket?.emit('walkie:join', _lastJoinArgs);
   }
 
   void leaveGroup(String groupId) {
+    _lastJoinArgs = null;
     _socket?.emit('walkie:leave', {'groupId': groupId});
   }
 

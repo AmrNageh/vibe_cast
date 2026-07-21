@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/widgets/neumorphic_container.dart';
 import '../bloc/walkie_talkie_bloc.dart';
@@ -126,12 +127,30 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
   @override
   void initState() {
     super.initState();
+    WakelockPlus.enable();
     _bloc = getIt<WalkieTalkieBloc>()..add(WalkieChannelEntered(widget.group));
     _waveController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000))..repeat(reverse: true);
+    
+    // Hardware Button Listener for Volume Keys
+    HardwareKeyboard.instance.addHandler(_handleVolumeKey);
+  }
+
+  bool _handleVolumeKey(KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.audioVolumeDown || event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
+      if (event is KeyDownEvent) {
+        _bloc.add(WalkiePTTPressed());
+      } else if (event is KeyUpEvent) {
+        _bloc.add(WalkiePTTReleased());
+      }
+      return true; // handled
+    }
+    return false;
   }
 
   @override
   void dispose() {
+    WakelockPlus.disable();
+    HardwareKeyboard.instance.removeHandler(_handleVolumeKey);
     _waveController.dispose();
     super.dispose();
   }
@@ -140,15 +159,28 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
   Widget build(BuildContext context) {
     return BlocProvider.value(
       value: _bloc,
-      child: PopScope(
-        canPop: true,
-        onPopInvokedWithResult: (didPop, _) {
-          _bloc.add(WalkieGroupLeft(widget.group.id));
+      child: BlocListener<WalkieTalkieBloc, WalkieTalkieState>(
+        listener: (context, state) {
+          if (state is WalkieTalkieInChannel) {
+            if (state.status == TransmissionStatus.transmitting) {
+              HapticFeedback.heavyImpact();
+            } else if (state.status == TransmissionStatus.idle) {
+              HapticFeedback.vibrate();
+            } else if (state.status == TransmissionStatus.receiving) {
+              // Play roger beep via haptics when someone starts talking to us
+              HapticFeedback.lightImpact();
+            }
+          }
         },
-        child: Scaffold(
-          body: SafeArea(
-            child: Column(
-              children: [
+        child: PopScope(
+          canPop: true,
+          onPopInvokedWithResult: (didPop, _) {
+            _bloc.add(WalkieGroupLeft(widget.group.id));
+          },
+          child: Scaffold(
+            body: SafeArea(
+              child: Column(
+                children: [
                 // Top Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
@@ -314,18 +346,29 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                           Positioned(
                             bottom: 160,
                             child: GestureDetector(
-                              onLongPressStart: (_) => _bloc.add(WalkiePTTPressed()),
+                              onLongPressStart: (_) {
+                                if (isReceiving) {
+                                  HapticFeedback.vibrate();
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Channel is busy. Wait for your turn.', style: TextStyle(color: Colors.white)), backgroundColor: Colors.red));
+                                } else {
+                                  _bloc.add(WalkiePTTPressed());
+                                }
+                              },
                               onLongPressEnd: (_) => _bloc.add(WalkiePTTReleased()),
                               child: NeumorphicContainer(
                                 width: 220,
                                 height: 220,
                                 shape: BoxShape.circle,
-                                isPressed: isTransmitting,
+                                isPressed: isTransmitting || isReceiving,
                                 child: Center(
                                   child: Icon(
-                                    Icons.mic,
+                                    isTransmitting ? Icons.mic : (isReceiving ? Icons.speaker_phone : Icons.mic_none),
                                     size: 100,
-                                    color: isTransmitting ? Colors.red : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[300] : Colors.grey[400]),
+                                    color: isTransmitting 
+                                      ? Colors.red 
+                                      : (isReceiving 
+                                        ? Colors.orange 
+                                        : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[300] : Colors.grey[400])),
                                   ),
                                 ),
                               ),
@@ -439,6 +482,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
           ),
           ),
         ),
+      ),
       ),
     );
   }
