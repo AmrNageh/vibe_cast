@@ -6,6 +6,7 @@ import '../../../core/widgets/neumorphic_container.dart';
 import '../bloc/walkie_talkie_bloc.dart';
 import '../bloc/walkie_talkie_event_state.dart';
 import 'package:flutter/services.dart';
+import '../../../main.dart' as import_main;
 
 class WalkieTalkieScreen extends StatefulWidget {
   const WalkieTalkieScreen({super.key});
@@ -94,11 +95,25 @@ class _WalkieTalkieScreenState extends State<WalkieTalkieScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const NeumorphicContainer(
-                      width: 50,
-                      height: 50,
-                      shape: BoxShape.circle,
-                      child: Icon(Icons.mic_none_outlined),
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        import_main.themeNotifier.value = import_main.themeNotifier.value == ThemeMode.light 
+                          ? ThemeMode.dark 
+                          : ThemeMode.light;
+                      },
+                      child: NeumorphicContainer(
+                        width: 50,
+                        height: 50,
+                        shape: BoxShape.circle,
+                        child: ValueListenableBuilder<ThemeMode>(
+                          valueListenable: import_main.themeNotifier,
+                          builder: (context, mode, _) {
+                            final isDark = mode == ThemeMode.dark || (mode == ThemeMode.system && Theme.of(context).brightness == Brightness.dark);
+                            return Icon(isDark ? Icons.light_mode : Icons.dark_mode);
+                          },
+                        ),
+                      ),
                     ),
                     Text(
                       'VIBECAST',
@@ -157,38 +172,7 @@ class _WalkieTalkieScreenState extends State<WalkieTalkieScreen> {
                 ),
               ),
               
-              // Codec Setting
-              BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
-                builder: (context, state) {
-                  if (state is WalkieTalkieGroupsLoaded) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-                      child: NeumorphicContainer(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        borderRadius: 16,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Codec Mode', style: Theme.of(context).textTheme.bodyLarge),
-                            Row(
-                              children: [
-                                Text(state.useOpus ? 'Opus' : 'PCM', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                const SizedBox(width: 8),
-                                Switch(
-                                  value: state.useOpus,
-                                  onChanged: (val) => _bloc.add(WalkieCodecToggled(val)),
-                                  activeTrackColor: Theme.of(context).primaryColor,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
-              ),
+
               
               Expanded(
                 child: BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(

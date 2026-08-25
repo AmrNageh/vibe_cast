@@ -1,59 +1,107 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
-import 'package:record/record.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:path_provider/path_provider.dart';
 
 @lazySingleton
 class AudioCaptureService {
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  StreamSubscription<Uint8List>? _recordSub;
-
-  final _audioStreamController = StreamController<Uint8List>.broadcast();
-  Stream<Uint8List> get audioStream => _audioStreamController.stream;
+  final FlutterSoundRecorder _audioRecorder = FlutterSoundRecorder();
+  StreamSubscription? _progressSub;
+  bool _isInitialized = false;
 
   final _amplitudeStreamController = StreamController<double>.broadcast();
   Stream<double> get amplitudeStream => _amplitudeStreamController.stream;
 
-  Timer? _amplitudeTimer;
+  String? _currentFilePath;
 
-  bool useOpus = true;
+  Future<void> init() async {
+    if (_isInitialized) return;
+    await _audioRecorder.openRecorder();
+    await _audioRecorder.setSubscriptionDuration(const Duration(milliseconds: 50));
+    _isInitialized = true;
+  }
 
-  Future<void> start() async {
-    if (await _audioRecorder.hasPermission()) {
-      final stream = await _audioRecorder.startStream(const RecordConfig(
-        encoder: AudioEncoder.pcm16bits,
-        sampleRate: 16000,
-        numChannels: 1,
-      ));
+  Future<void> startRecording() async {
+    final status = await Permission.microphone.request();
+    
+    if (status.isGranted) {
+      if (!_isInitialized) await init();
+      if (_audioRecorder.isRecording) await stopRecording();
 
-      _recordSub = stream.listen((data) {
-        _audioStreamController.add(data);
-      });
+      try {
+        final session = await AudioSession.instance;
+        await session.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+          avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.defaultToSpeaker | AVAudioSessionCategoryOptions.mixWithOthers,
+          avAudioSessionMode: AVAudioSessionMode.spokenAudio,
+          avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+          avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+          androidAudioAttributes: AndroidAudioAttributes(
+            contentType: AndroidAudioContentType.speech,
+            flags: AndroidAudioFlags.none,
+            usage: AndroidAudioUsage.voiceCommunication,
+          ),
+          androidAudioFocusGainType: AndroidAudioFocusGainType.gainTransientExclusive,
+          androidWillPauseWhenDucked: true,
+        ));
 
-      _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) async {
-        if (await _audioRecorder.isRecording()) {
-          final amp = await _audioRecorder.getAmplitude();
-          // Convert from -160..0 to 0..1 roughly
-          double val = (amp.current + 60) / 60;
-          if (val < 0) val = 0;
-          if (val > 1) val = 1;
-          _amplitudeStreamController.add(val);
+        if (Platform.isAndroid) {
+          try {
+            await session.setActive(true);
+          } catch (_) {}
         }
-      });
+
+        final tempDir = await getTemporaryDirectory();
+        _currentFilePath = '${tempDir.path}/vibe_cast_record_${DateTime.now().millisecondsSinceEpoch}.aac';
+
+        await _audioRecorder.startRecorder(
+          toFile: _currentFilePath,
+          codec: Codec.aacADTS,
+        );
+
+        if (_audioRecorder.onProgress != null) {
+          _progressSub = _audioRecorder.onProgress!.listen((e) {
+            double decibels = e.decibels ?? 0.0;
+            double val = decibels / 120.0;
+            if (val < 0) val = 0;
+            if (val > 1) val = 1;
+            _amplitudeStreamController.add(val);
+          });
+        }
+      } catch (e) {
+        debugPrint('Failed to start recording: $e');
+      }
     }
   }
 
-  Future<void> stop() async {
-    _amplitudeTimer?.cancel();
-    await _recordSub?.cancel();
-    await _audioRecorder.stop();
+  Future<Uint8List?> stopRecording() async {
+    await _progressSub?.cancel();
+    _progressSub = null;
+    
+    if (_audioRecorder.isRecording) {
+      await _audioRecorder.stopRecorder();
+    }
     _amplitudeStreamController.add(0.0);
+
+    if (_currentFilePath != null) {
+      final file = File(_currentFilePath!);
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        return bytes;
+      }
+    }
+    return null;
   }
 
   void dispose() {
-    stop();
-    _audioStreamController.close();
+    stopRecording();
     _amplitudeStreamController.close();
-    _audioRecorder.dispose();
+    if (_isInitialized) {
+      _audioRecorder.closeRecorder();
+    }
   }
 }

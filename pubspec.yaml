@@ -55,6 +55,7 @@ dependencies:
   audio_session: ^0.2.4
   wakelock_plus: ^1.5.2
   audioplayers: ^6.7.1
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
@@ -111,3 +112,10 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_native_splash:
+  color: "#E0E5EC"
+  color_dark: "#1A1A1A"
+  android_12:
+    color: "#E0E5EC"
+    color_dark: "#1A1A1A"

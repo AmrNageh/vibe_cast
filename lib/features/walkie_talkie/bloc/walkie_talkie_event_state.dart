@@ -54,6 +54,14 @@ class WalkieGroupLeft extends WalkieTalkieEvent {
   List<Object?> get props => [groupId];
 }
 
+class WalkieGroupPermanentlyLeft extends WalkieTalkieEvent {
+  final String groupId;
+  const WalkieGroupPermanentlyLeft(this.groupId);
+
+  @override
+  List<Object?> get props => [groupId];
+}
+
 class WalkieChannelEntered extends WalkieTalkieEvent {
   final WalkieGroupEntity group;
   const WalkieChannelEntered(this.group);
@@ -62,9 +70,21 @@ class WalkieChannelEntered extends WalkieTalkieEvent {
   List<Object?> get props => [group];
 }
 
-class WalkiePTTPressed extends WalkieTalkieEvent {}
+class WalkiePTTPressed extends WalkieTalkieEvent {
+  final String? targetUserId;
+  const WalkiePTTPressed({this.targetUserId});
 
-class WalkiePTTReleased extends WalkieTalkieEvent {}
+  @override
+  List<Object?> get props => [targetUserId];
+}
+
+class WalkiePTTReleased extends WalkieTalkieEvent {
+  final String? targetUserId;
+  const WalkiePTTReleased({this.targetUserId});
+
+  @override
+  List<Object?> get props => [targetUserId];
+}
 
 class WalkieIncomingTransmission extends WalkieTalkieEvent {
   final String senderId;

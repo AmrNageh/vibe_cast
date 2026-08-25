@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/di/injection.dart';
 import '../services/walkie_repository.dart';
 import '../../../core/widgets/neumorphic_container.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../../../core/services/background_service_config.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -20,6 +22,15 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _initApp() async {
     final startTime = DateTime.now();
+
+    // Request critical permissions before initializing any services
+    await [
+      Permission.microphone,
+      Permission.notification,
+    ].request();
+
+    // Initialize background service securely after permissions are handled
+    await initializeBackgroundService();
     
     // Initialize identity
     final repo = getIt<WalkieRepository>();

@@ -10,6 +10,7 @@ import '../services/walkie_signal_service.dart';
 import '../services/walkie_repository.dart';
 import '../models/online_user_entity.dart';
 import '../models/chat_message_entity.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 @lazySingleton
 class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
@@ -17,7 +18,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   final AudioPlaybackService _audioPlaybackService;
   final WalkieSignalService _walkieSignalService;
   final WalkieRepository _walkieRepository;
-  StreamSubscription? _audioCaptureSub;
+  StreamSubscription? _audioSignalSub;
   StreamSubscription? _pttSignalSub;
   StreamSubscription? _onlineUsersSub;
   StreamSubscription? _historySub;
@@ -45,14 +46,22 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     on<WalkieChatMessageReceived>(_onChatMessageReceived);
     on<WalkieGroupCreated>(_onGroupCreated);
     on<WalkieGroupJoinedByInvite>(_onGroupJoinedByInvite);
+    on<WalkieGroupPermanentlyLeft>(_onGroupPermanentlyLeft);
     on<WalkieCodecToggled>(_onCodecToggled);
   }
 
   Future<void> _onInitialized(WalkieInitialized event, Emitter<WalkieTalkieState> emit) async {
     emit(WalkieTalkieLoading());
     try {
+      // Initialize audio services (they configure their own audio sessions)
+      await _audioPlaybackService.init();
       // Connect to the signaling server
       _walkieSignalService.connect(AppConfig.serverUrl);
+      
+      _audioSignalSub?.cancel();
+      _audioSignalSub = _walkieSignalService.audioStream.listen((audioBlob) {
+        _audioPlaybackService.playAudioBlob(audioBlob);
+      });
       
       _pttSignalSub?.cancel();
       _pttSignalSub = _walkieSignalService.pttStream.listen((data) {
@@ -113,55 +122,53 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     } catch (_) {}
 
     _walkieSignalService.joinGroup(event.group.id, 0, localIp, _walkieRepository.userName, _walkieRepository.userId);
+    FlutterBackgroundService().startService();
     emit(WalkieTalkieInChannel(group: event.group));
   }
 
   Future<void> _onGroupLeft(WalkieGroupLeft event, Emitter<WalkieTalkieState> emit) async {
     _walkieSignalService.leaveGroup(event.groupId);
+    FlutterBackgroundService().invoke('stopService');
     try {
       final groups = await _walkieRepository.getGroups();
       emit(WalkieTalkieGroupsLoaded(groups: groups, onlineUsers: const []));
-    } catch (_) {
-      // Just emit empty if it fails
-      emit(const WalkieTalkieGroupsLoaded(groups: [], onlineUsers: []));
+    } catch (e) {
+      emit(WalkieTalkieFailure(e.toString()));
+    }
+  }
+
+  Future<void> _onGroupPermanentlyLeft(WalkieGroupPermanentlyLeft event, Emitter<WalkieTalkieState> emit) async {
+    _walkieSignalService.leaveGroup(event.groupId);
+    FlutterBackgroundService().invoke('stopService');
+    try {
+      await _walkieRepository.permanentlyLeaveGroup(event.groupId);
+      final groups = await _walkieRepository.getGroups();
+      emit(WalkieTalkieGroupsLoaded(groups: groups, onlineUsers: const []));
+    } catch (e) {
+      emit(WalkieTalkieFailure(e.toString()));
     }
   }
 
   Future<void> _onPTTPressed(WalkiePTTPressed event, Emitter<WalkieTalkieState> emit) async {
-    final currentState = state;
-    if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
-      emit(currentState.copyWith(status: TransmissionStatus.transmitting, activeTransmitterName: 'Me'));
+      final currentState = state;
+      if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
+        emit(currentState.copyWith(status: TransmissionStatus.transmitting, activeTransmitterName: event.targetUserId != null ? 'Private Call' : 'Me'));
       
-      // 1. Alert network we are taking the floor
-      _walkieSignalService.startPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
-      
-      // 2. Wait for network latency to allow receivers to open their AudioPlaybackService buffers
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // 2.5 Abort if user released PTT during the latency delay
-      if (state is WalkieTalkieInChannel && (state as WalkieTalkieInChannel).status == TransmissionStatus.transmitting) {
-        // 3. Start capturing and broadcasting audio
-        await _audioCaptureService.start();
-        
-        // 3.5 Final check in case release happened exactly during capture service initialization
-        if (state is WalkieTalkieInChannel && (state as WalkieTalkieInChannel).status == TransmissionStatus.transmitting) {
-          _audioCaptureSub = _audioCaptureService.audioStream.listen((data) {
-            _walkieSignalService.sendAudio(currentState.group.id, _walkieRepository.userId, data);
-          });
-        } else {
-          await _audioCaptureService.stop();
-        }
+        _walkieSignalService.startPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId, targetUserId: event.targetUserId);
+        await _audioCaptureService.startRecording();
       }
     }
-  }
 
   Future<void> _onPTTReleased(WalkiePTTReleased event, Emitter<WalkieTalkieState> emit) async {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.transmitting) {
       emit(currentState.copyWith(status: TransmissionStatus.idle, clearTransmitter: true));
       
-      await _audioCaptureService.stop();
-      await _audioCaptureSub?.cancel();
+      final audioBytes = await _audioCaptureService.stopRecording();
+      if (audioBytes != null && audioBytes.isNotEmpty) {
+        _walkieSignalService.sendAudio(currentState.group.id, _walkieRepository.userId, audioBytes, targetUserId: event.targetUserId);
+      }
+      
       _walkieSignalService.stopPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
     }
   }
@@ -173,8 +180,6 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
         status: TransmissionStatus.receiving,
         activeTransmitterName: event.senderName,
       ));
-
-      _audioPlaybackService.playStream(_walkieSignalService.audioStream);
     }
   }
 
@@ -254,7 +259,6 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   }
 
   void _onCodecToggled(WalkieCodecToggled event, Emitter<WalkieTalkieState> emit) {
-    _audioCaptureService.useOpus = event.useOpus;
     final currentState = state;
     if (currentState is WalkieTalkieGroupsLoaded) {
       emit(WalkieTalkieGroupsLoaded(
@@ -267,7 +271,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
 
   @override
   Future<void> close() {
-    _audioCaptureSub?.cancel();
+    _audioSignalSub?.cancel();
     _pttSignalSub?.cancel();
     _onlineUsersSub?.cancel();
     _historySub?.cancel();

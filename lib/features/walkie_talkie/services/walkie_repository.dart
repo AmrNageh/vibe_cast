@@ -106,4 +106,15 @@ class WalkieRepository {
       throw Exception('Failed to join group: $e');
     }
   }
+
+  Future<void> permanentlyLeaveGroup(String groupId) async {
+    try {
+      await _dio.post('/api/walkie/groups/leave', data: {
+        'groupId': groupId,
+        'userId': userId,
+      });
+    } catch (e) {
+      throw Exception('Failed to leave group: $e');
+    }
+  }
 }

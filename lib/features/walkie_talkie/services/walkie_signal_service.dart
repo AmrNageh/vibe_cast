@@ -39,14 +39,21 @@ class WalkieSignalService {
       }
     });
 
-    _socket?.on('walkie:ptt_start', (data) => _pttController.add({'type': 'start', ...data}));
-    _socket?.on('walkie:ptt_stop', (data) => _pttController.add({'type': 'stop', ...data}));
+    _socket?.on('walkie:ptt_start', (data) {
+      if (data != null && data['senderId'] != null && data['senderId'] == _lastJoinArgs?['userId']) return;
+      _pttController.add({'type': 'start', ...data});
+    });
+    _socket?.on('walkie:ptt_stop', (data) {
+      if (data != null && data['senderId'] != null && data['senderId'] == _lastJoinArgs?['userId']) return;
+      _pttController.add({'type': 'stop', ...data});
+    });
     _socket?.on('walkie:online_users', (data) => _onlineUsersController.add(data));
     _socket?.on('walkie:history', (data) => _historyController.add(data));
     _socket?.on('walkie:chat_message', (data) => _chatController.add(data));
     _socket?.on('walkie:chat_history', (data) => _chatHistoryController.add(data));
     _socket?.on('walkie:audio', (data) {
       if (data != null && data['audioBlob'] != null) {
+        if (data['senderId'] != null && data['senderId'] == _lastJoinArgs?['userId']) return;
         final audioBlob = data['audioBlob'];
         if (audioBlob is String) {
           _audioController.add(base64Decode(audioBlob));
@@ -88,11 +95,12 @@ class WalkieSignalService {
     _socket?.emit('walkie:leave', {'groupId': groupId});
   }
 
-  void startPtt(String groupId, String senderName, String? senderId) {
+  void startPtt(String groupId, String senderName, String? senderId, {String? targetUserId}) {
     _socket?.emit('walkie:ptt_start', {
       'groupId': groupId,
       'senderName': senderName,
       'senderId': senderId,
+      'targetUserId': targetUserId,
     });
   }
 
@@ -105,20 +113,22 @@ class WalkieSignalService {
     });
   }
 
-  void stopPtt(String groupId, String senderName, String? senderId) {
+  void stopPtt(String groupId, String senderName, String? senderId, {String? targetUserId}) {
     _socket?.emit('walkie:ptt_stop', {
       'groupId': groupId,
       'senderName': senderName,
       'senderId': senderId,
+      'targetUserId': targetUserId,
     });
   }
 
-  void sendAudio(String groupId, String senderId, Uint8List audioData) {
+  void sendAudio(String groupId, String senderId, Uint8List audioData, {String? targetUserId}) {
     final base64String = base64Encode(audioData);
     _socket?.emit('walkie:audio', {
       'groupId': groupId,
       'senderId': senderId,
       'audioBlob': base64String,
+      'targetUserId': targetUserId,
     });
   }
 

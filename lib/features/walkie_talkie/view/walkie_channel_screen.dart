@@ -9,9 +9,9 @@ import '../bloc/walkie_talkie_bloc.dart';
 import '../bloc/walkie_talkie_event_state.dart';
 import '../models/walkie_group_entity.dart';
 import '../services/audio_capture_service.dart';
+import '../services/audio_playback_service.dart';
 import '../services/walkie_repository.dart';
 import '../services/walkie_signal_service.dart';
-
 class WalkieChannelScreen extends StatefulWidget {
   final WalkieGroupEntity group;
   const WalkieChannelScreen({super.key, required this.group});
@@ -23,6 +23,8 @@ class WalkieChannelScreen extends StatefulWidget {
 class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTickerProviderStateMixin {
   late final WalkieTalkieBloc _bloc;
   late final AnimationController _waveController;
+  String? _selectedTargetUserId;
+  String _currentStatus = 'Active';
 
   void _showChatSheet(BuildContext context, WalkieTalkieInChannel state) {
     final textController = TextEditingController();
@@ -130,6 +132,9 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
     WakelockPlus.enable();
     _bloc = getIt<WalkieTalkieBloc>()..add(WalkieChannelEntered(widget.group));
     _waveController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000))..repeat(reverse: true);
+    _waveController.addListener(() {
+      if (mounted) setState(() {});
+    });
     
     // Hardware Button Listener for Volume Keys
     HardwareKeyboard.instance.addHandler(_handleVolumeKey);
@@ -138,7 +143,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
   bool _handleVolumeKey(KeyEvent event) {
     if (event.logicalKey == LogicalKeyboardKey.audioVolumeDown || event.logicalKey == LogicalKeyboardKey.audioVolumeUp) {
       if (event is KeyDownEvent) {
-        _bloc.add(WalkiePTTPressed());
+        _bloc.add(WalkiePTTPressed(targetUserId: _selectedTargetUserId));
       } else if (event is KeyUpEvent) {
         _bloc.add(WalkiePTTReleased());
       }
@@ -165,10 +170,9 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
             if (state.status == TransmissionStatus.transmitting) {
               HapticFeedback.heavyImpact();
             } else if (state.status == TransmissionStatus.idle) {
-              HapticFeedback.vibrate();
+              HapticFeedback.heavyImpact();
             } else if (state.status == TransmissionStatus.receiving) {
-              // Play roger beep via haptics when someone starts talking to us
-              HapticFeedback.lightImpact();
+              HapticFeedback.heavyImpact();
             }
           }
         },
@@ -220,6 +224,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                             builder: (context, state) {
                               return GestureDetector(
                                 onTap: () {
+                                  HapticFeedback.heavyImpact();
                                   if (state is WalkieTalkieInChannel) {
                                     _showChatSheet(context, state);
                                   }
@@ -233,89 +238,43 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                               );
                             }
                           ),
+                          const SizedBox(width: 16),
+                          GestureDetector(
+                            onTap: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Leave Group'),
+                                    content: const Text('Are you sure you want to permanently leave this group?'),
+                                    actions: [
+                                      TextButton(onPressed: () => context.pop(), child: const Text('CANCEL')),
+                                      TextButton(
+                                        onPressed: () {
+                                          HapticFeedback.heavyImpact();
+                                          _bloc.add(WalkieGroupPermanentlyLeft(widget.group.id));
+                                          context.pop(); // Close dialog
+                                          context.pop(); // Exit screen
+                                        },
+                                        child: const Text('LEAVE', style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                            },
+                            child: const NeumorphicContainer(
+                              width: 50,
+                              height: 50,
+                              shape: BoxShape.circle,
+                              child: Icon(Icons.exit_to_app, size: 20, color: Colors.red),
+                            ),
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
 
-              // Active Contact Card
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: GestureDetector(
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
-                        bloc: _bloc,
-                        builder: (context, state) {
-                          List<String> members = widget.group.permanentMembers;
-                          int onlineCount = 0;
-                          if (state is WalkieTalkieInChannel) {
-                            onlineCount = state.members.length;
-                            if (state.members.isNotEmpty) {
-                              members = state.members.map((m) => '${m.name} (Online)').toList();
-                            }
-                          }
-                          return AlertDialog(
-                            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            title: Text('CHANNEL MEMBERS ($onlineCount Online)'),
-                            content: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: members.isEmpty 
-                                ? [const Text('No registered members yet.')]
-                                : members.map((m) => ListTile(
-                                    leading: Icon(Icons.person, color: m.contains('(Online)') ? Colors.green : Colors.grey),
-                                    title: Text(m),
-                                  )).toList(),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => context.pop(),
-                                child: const Text('CLOSE'),
-                              ),
-                            ],
-                          );
-                        }
-                      ),
-                    );
-                  },
-                  child: NeumorphicContainer(
-                    padding: const EdgeInsets.all(16),
-                    borderRadius: 20,
-                    child: Row(
-                      children: [
-                        const NeumorphicContainer(
-                          width: 60,
-                          height: 60,
-                          shape: BoxShape.circle,
-                          child: Icon(Icons.person, size: 30),
-                        ),
-                        const SizedBox(width: 16),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.group.name,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 18),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Tap to view members',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
 
-              const SizedBox(height: 40),
 
               // Main PTT Area (mimicking the bottom sheet)
               Expanded(
@@ -342,19 +301,190 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                             ),
                           ),
                           
+                          // Nokia LCD Screen ABOVE the PTT button
+                          Positioned(
+                            top: 10,
+                            left: 32,
+                            right: 32,
+                            bottom: 350,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF87A96B) : const Color(0xFFE5E5E5),
+                                borderRadius: BorderRadius.circular(15),
+                                border: Border.all(color: Colors.black45, width: 3),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (Theme.of(context).brightness == Brightness.dark ? Colors.greenAccent : Colors.black54).withValues(alpha: 0.2), 
+                                    blurRadius: 10, 
+                                    spreadRadius: 2,
+                                  )
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '${widget.group.name.toUpperCase()} MEMBERS',
+                                    style: const TextStyle(fontFamily: 'DotGothic16', fontSize: 14, color: Colors.black54, fontWeight: FontWeight.bold),
+                                  ),
+                                  const Divider(color: Colors.black26, height: 8, thickness: 1),
+                                  Expanded(
+                                    child: (state is WalkieTalkieInChannel) ? ListView.builder(
+                                      padding: EdgeInsets.zero,
+                                      itemCount: state.members.length + 1,
+                                      itemBuilder: (context, index) {
+                                        if (index == 0) {
+                                          final isTalkToAll = _selectedTargetUserId == null;
+                                          return GestureDetector(
+                                            onTap: () {
+                                              HapticFeedback.selectionClick();
+                                              setState(() => _selectedTargetUserId = null);
+                                            },
+                                            child: Container(
+                                              margin: const EdgeInsets.only(bottom: 4),
+                                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                              decoration: BoxDecoration(
+                                                color: isTalkToAll ? Colors.black26 : Colors.transparent,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Icon(Icons.public, size: 20, color: isTalkToAll ? Colors.white : Colors.black87),
+                                                  const SizedBox(width: 16),
+                                                  Expanded(
+                                                    child: Text(
+                                                      'TALK TO ALL',
+                                                      style: TextStyle(
+                                                        fontFamily: 'DotGothic16', 
+                                                        fontSize: 16, 
+                                                        color: isTalkToAll ? Colors.white : Colors.black87, 
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        }
+
+                                        final member = state.members[index - 1];
+                                        if (member.id == getIt<WalkieRepository>().userId) return const SizedBox.shrink();
+                                        
+                                        final isSelected = _selectedTargetUserId == member.id;
+                                        return Container(
+                                          margin: const EdgeInsets.only(bottom: 4),
+                                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                          decoration: BoxDecoration(
+                                            color: isSelected ? Colors.black26 : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  member.name.toUpperCase(),
+                                                  style: TextStyle(
+                                                    fontFamily: 'DotGothic16', 
+                                                    fontSize: 16, 
+                                                    color: isSelected ? Colors.white : Colors.black87, 
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              GestureDetector(
+                                                onTap: () {
+                                                  HapticFeedback.lightImpact();
+                                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('DM ${member.name} (Coming soon)')));
+                                                },
+                                                child: Icon(Icons.message, size: 20, color: isSelected ? Colors.white70 : Colors.black54),
+                                              ),
+                                              const SizedBox(width: 16),
+                                              GestureDetector(
+                                                onTap: () {
+                                                  HapticFeedback.selectionClick();
+                                                  setState(() => _selectedTargetUserId = member.id);
+                                                },
+                                                child: Icon(
+                                                  Icons.settings_voice, 
+                                                  size: 20, 
+                                                  color: isSelected ? Colors.red[900] : Colors.black54,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    ) : const Center(
+                                      child: Text(
+                                        'CONNECTING...',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(fontFamily: 'DotGothic16', fontSize: 16, color: Colors.black54),
+                                      ),
+                                    ),
+                                  ),
+                                  
+                                  // Waveform INSIDE LCD Screen
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    height: 40,
+                                    child: StreamBuilder<double>(
+                                      stream: isReceiving 
+                                        ? getIt<AudioPlaybackService>().playbackAmplitudeStream 
+                                        : getIt<AudioCaptureService>().amplitudeStream,
+                                      initialData: 0.0,
+                                      builder: (context, snapshot) {
+                                        final amplitude = snapshot.data ?? 0.0;
+                                        return Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: List.generate(40, (index) {
+                                            double activeHeight = 4.0;
+                                            if (isTransmitting) {
+                                              final localScale = (index % 5 + 1) / 5;
+                                              activeHeight = 4.0 + (30 * amplitude * localScale);
+                                            } else if (isReceiving) {
+                                              final localScale = (index % 6 + 1) / 6;
+                                              activeHeight = 4.0 + (15 * amplitude * localScale);
+                                            }
+
+                                            return AnimatedContainer(
+                                              duration: const Duration(milliseconds: 50),
+                                              margin: const EdgeInsets.symmetric(horizontal: 2),
+                                              width: 3,
+                                              height: activeHeight,
+                                              decoration: BoxDecoration(
+                                                color: isTransmitting || isReceiving 
+                                                  ? Colors.black87 // Active "pixels"
+                                                  : Colors.black26, // Idle "pixels"
+                                                borderRadius: BorderRadius.circular(1),
+                                              ),
+                                            );
+                                          }),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
                           // Giant PTT Button anchored to center-bottom
                           Positioned(
-                            bottom: 160,
+                            bottom: 110,
                             child: GestureDetector(
                               onLongPressStart: (_) {
                                 if (isReceiving) {
                                   HapticFeedback.vibrate();
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Channel is busy. Wait for your turn.', style: TextStyle(color: Colors.white)), backgroundColor: Colors.red));
                                 } else {
-                                  _bloc.add(WalkiePTTPressed());
+                                  _bloc.add(WalkiePTTPressed(targetUserId: _selectedTargetUserId));
                                 }
                               },
-                              onLongPressEnd: (_) => _bloc.add(WalkiePTTReleased()),
+                              onLongPressEnd: (_) => _bloc.add(WalkiePTTReleased(targetUserId: _selectedTargetUserId)),
                               child: NeumorphicContainer(
                                 width: 220,
                                 height: 220,
@@ -375,52 +505,6 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                             ),
                           ),
 
-                          // Waveform below PTT
-                          Positioned(
-                            bottom: 100,
-                            left: 0,
-                            right: 0,
-                            child: SizedBox(
-                              height: 60,
-                              child: StreamBuilder<double>(
-                                stream: getIt<AudioCaptureService>().amplitudeStream,
-                                initialData: 0.0,
-                                builder: (context, snapshot) {
-                                  final amplitude = snapshot.data ?? 0.0;
-                                  return Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.center,
-                                    children: List.generate(40, (index) {
-                                      // Default animation baseline
-                                      double activeHeight = 8.0;
-                                      
-                                      if (isTransmitting) {
-                                        // Dynamic based on microphone
-                                        final localScale = (index % 5 + 1) / 5; // create some wave variation
-                                        activeHeight = 8.0 + (50 * amplitude * localScale);
-                                      } else if (isReceiving) {
-                                        // Keep standard animation for receiving for now
-                                        activeHeight = 8.0 + (30 * (_waveController.value * ((index % 6) + 1) / 6));
-                                      }
-
-                                      return AnimatedContainer(
-                                        duration: const Duration(milliseconds: 50),
-                                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                                        width: 3,
-                                        height: activeHeight,
-                                        decoration: BoxDecoration(
-                                          color: isTransmitting || isReceiving 
-                                            ? Theme.of(context).primaryColor 
-                                            : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[700] : Colors.grey[400]),
-                                          borderRadius: BorderRadius.circular(2),
-                                        ),
-                                      );
-                                    }),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
 
                           // Bottom Action Row
                           Positioned(
@@ -432,7 +516,10 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                               children: [
                                 GestureDetector(
                                   onTap: () {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('History log opened.')));
+                                    HapticFeedback.lightImpact();
+                                    if (state is WalkieTalkieInChannel) {
+                                      _showChatSheet(context, state);
+                                    }
                                   },
                                   child: const NeumorphicContainer(
                                     width: 50,
@@ -441,18 +528,34 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                     child: Icon(Icons.history),
                                   ),
                                 ),
-                                GestureDetector(
-                                  onTap: () {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status set to Active.')));
-                                  },
-                                  child: NeumorphicContainer(
-                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                    borderRadius: 20,
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.check_circle_outline, color: Colors.green, size: 20),
-                                        const SizedBox(width: 8),
-                                        Text('Active', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.green, fontWeight: FontWeight.bold)),
+                                NeumorphicContainer(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                                  borderRadius: 20,
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: _currentStatus,
+                                      icon: const Icon(Icons.arrow_drop_down),
+                                      dropdownColor: Theme.of(context).scaffoldBackgroundColor,
+                                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                                      onChanged: (String? newValue) {
+                                        if (newValue != null) {
+                                          setState(() => _currentStatus = newValue);
+                                          HapticFeedback.selectionClick();
+                                        }
+                                      },
+                                      items: [
+                                        DropdownMenuItem(
+                                          value: 'Active',
+                                          child: Row(children: [const Icon(Icons.circle, color: Colors.green, size: 12), const SizedBox(width: 8), Text('Active', style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color))]),
+                                        ),
+                                        DropdownMenuItem(
+                                          value: 'Busy',
+                                          child: Row(children: [const Icon(Icons.circle, color: Colors.orange, size: 12), const SizedBox(width: 8), Text('Busy', style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color))]),
+                                        ),
+                                        DropdownMenuItem(
+                                          value: 'Offline',
+                                          child: Row(children: [const Icon(Icons.circle, color: Colors.grey, size: 12), const SizedBox(width: 8), Text('Offline', style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color))]),
+                                        ),
                                       ],
                                     ),
                                   ),

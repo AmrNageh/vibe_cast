@@ -157,7 +157,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('walkie:ptt_start', (data) => {
-    const { groupId, senderName, senderId } = data;
+    const { groupId, senderName, senderId, targetUserId } = data;
     
     // Log history
     const logEntry = {
@@ -165,23 +165,28 @@ io.on('connection', (socket) => {
       senderId: senderId || socket.id,
       senderName: senderName || 'Unknown',
       timestamp: new Date().toISOString(),
-      action: 'started speaking'
+      action: targetUserId ? `started private call` : 'started speaking'
     };
     
     if (!historyLogs[groupId]) historyLogs[groupId] = [];
     historyLogs[groupId].push(logEntry);
     if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
 
-    io.to(groupId).emit('walkie:ptt_start', {
-      senderId: senderId || socket.id,
-      senderName,
-    });
+    if (targetUserId) {
+      const group = groups.find(g => g.id === groupId);
+      const targetUser = group?.activeMembers.find(m => m.userId === targetUserId);
+      if (targetUser) {
+        io.to(targetUser.socketId).emit('walkie:ptt_start', { senderId: senderId || socket.id, senderName });
+      }
+    } else {
+      io.to(groupId).emit('walkie:ptt_start', { senderId: senderId || socket.id, senderName });
+    }
     
     io.to(groupId).emit('walkie:history', historyLogs[groupId]);
   });
 
   socket.on('walkie:ptt_stop', (data) => {
-    const { groupId, senderId, senderName } = data;
+    const { groupId, senderId, senderName, targetUserId } = data;
     
     const logEntry = {
       id: Date.now().toString(),
@@ -195,9 +200,15 @@ io.on('connection', (socket) => {
     historyLogs[groupId].push(logEntry);
     if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
 
-    io.to(groupId).emit('walkie:ptt_stop', {
-      senderId: senderId || socket.id,
-    });
+    if (targetUserId) {
+      const group = groups.find(g => g.id === groupId);
+      const targetUser = group?.activeMembers.find(m => m.userId === targetUserId);
+      if (targetUser) {
+        io.to(targetUser.socketId).emit('walkie:ptt_stop', { senderId: senderId || socket.id });
+      }
+    } else {
+      io.to(groupId).emit('walkie:ptt_stop', { senderId: senderId || socket.id });
+    }
     
     io.to(groupId).emit('walkie:history', historyLogs[groupId]);
   });
@@ -208,13 +219,23 @@ io.on('connection', (socket) => {
   });
 
   socket.on('walkie:audio', (data) => {
-    // data should contain { groupId, senderId, audioBlob }
-    const { groupId, senderId, audioBlob } = data;
-    // Broadcast to everyone else in the group
-    socket.to(groupId).emit('walkie:audio', {
-      senderId: senderId || socket.id,
-      audioBlob: audioBlob
-    });
+    const { groupId, senderId, audioBlob, targetUserId } = data;
+    
+    if (targetUserId) {
+      const group = groups.find(g => g.id === groupId);
+      const targetUser = group?.activeMembers.find(m => m.userId === targetUserId);
+      if (targetUser) {
+        io.to(targetUser.socketId).emit('walkie:audio', {
+          senderId: senderId || socket.id,
+          audioBlob: audioBlob
+        });
+      }
+    } else {
+      socket.to(groupId).emit('walkie:audio', {
+        senderId: senderId || socket.id,
+        audioBlob: audioBlob
+      });
+    }
   });
 
   socket.on('disconnect', () => {
