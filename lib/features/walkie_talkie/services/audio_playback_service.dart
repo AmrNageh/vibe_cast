@@ -101,38 +101,28 @@ class AudioPlaybackService {
     debugPrint('Live playback jitter buffer initialized');
   }
 
+  bool _isFeeding = false;
+
   /// Feeds an incoming PCM chunk into the jitter buffer.
-  /// FIX Bug #2: Once player is active, writes directly to native AudioTrack
-  /// instead of using a Timer.periodic drain loop.
   void feedChunk(Uint8List chunk) {
     if (!_isStreaming || _isStopping || chunk.isEmpty) return;
 
-    if (_isPrebuffering) {
-      // Still pre-buffering — accumulate chunks
-      if (_bufferQueue.length < _maxQueueSize) {
-        _bufferQueue.add(chunk);
-      } else {
-        _bufferQueue.removeAt(0);
-        _bufferQueue.add(chunk);
-      }
+    if (_bufferQueue.length < _maxQueueSize) {
+      _bufferQueue.add(chunk);
+    } else {
+      _bufferQueue.removeAt(0);
+      _bufferQueue.add(chunk);
+    }
 
+    if (_isPrebuffering) {
       // Check pre-buffering threshold
       if (_bufferQueue.length >= _prebufferThreshold) {
         _isPrebuffering = false;
         _startNativePlayer();
       }
     } else if (_isPlayerActive) {
-      // Player is active — drain any queued chunks first, then feed new one directly
-      _drainQueueDirect();
-      _feedSafe(chunk);
-    } else {
-      // Player not yet active (still starting) — buffer
-      if (_bufferQueue.length < _maxQueueSize) {
-        _bufferQueue.add(chunk);
-      } else {
-        _bufferQueue.removeAt(0);
-        _bufferQueue.add(chunk);
-      }
+      // Player is active — process queue sequentially
+      _processQueue();
     }
   }
 
@@ -152,29 +142,32 @@ class AudioPlaybackService {
       _isPlayerActive = true;
       debugPrint('Native AudioTrack player started from stream');
 
-      // Immediately drain pre-buffered chunks
-      _drainQueueDirect();
+      // Immediately process pre-buffered chunks
+      _processQueue();
     } catch (e) {
       debugPrint('Failed to start native stream player: $e');
       _isPlayerActive = false;
     }
   }
 
-  /// Drains all queued chunks directly to native player (no timer).
-  void _drainQueueDirect() {
-    while (_bufferQueue.isNotEmpty && _isPlayerActive && !_isStopping) {
-      final chunk = _bufferQueue.removeAt(0);
-      _feedSafe(chunk);
-    }
-  }
-
-  /// Safely feeds a single chunk to native player with error catch.
-  void _feedSafe(Uint8List chunk) {
-    if (!_isPlayerActive || _isStopping || _player == null) return;
+  /// Drains all queued chunks sequentially to native player.
+  Future<void> _processQueue() async {
+    if (_isFeeding || !_isPlayerActive || _isStopping || _player == null) return;
+    
+    _isFeeding = true;
     try {
-      _player!.feedUint8FromStream(chunk);
-    } catch (e) {
-      debugPrint('Safe caught feed error: $e');
+      while (_bufferQueue.isNotEmpty && _isPlayerActive && !_isStopping && _player != null) {
+        final chunk = _bufferQueue.removeAt(0);
+        try {
+          await _player!.feedUint8FromStream(chunk);
+        } catch (e) {
+          debugPrint('Safe caught feed error: $e');
+          // If feeding fails (e.g. stream closed), stop processing
+          break;
+        }
+      }
+    } finally {
+      _isFeeding = false;
     }
   }
 
