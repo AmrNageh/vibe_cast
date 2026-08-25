@@ -6,6 +6,7 @@ class WalkieGroupEntity extends Equatable {
   final bool isPrivate;
   final int memberCount;
   final List<String> permanentMembers;
+  final String? ownerId;
 
   const WalkieGroupEntity({
     required this.id,
@@ -13,6 +14,7 @@ class WalkieGroupEntity extends Equatable {
     required this.isPrivate,
     required this.memberCount,
     this.permanentMembers = const [],
+    this.ownerId,
   });
 
   factory WalkieGroupEntity.fromJson(Map<String, dynamic> json) {
@@ -22,6 +24,7 @@ class WalkieGroupEntity extends Equatable {
       isPrivate: json['isPrivate'] ?? false,
       memberCount: json['memberCount'] ?? 0,
       permanentMembers: json['permanentMembers'] != null ? List<String>.from(json['permanentMembers']) : [],
+      ownerId: json['ownerId'],
     );
   }
 

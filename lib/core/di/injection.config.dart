@@ -17,6 +17,8 @@ import 'package:vibe_cast/features/walkie_talkie/services/audio_capture_service.
     as _i513;
 import 'package:vibe_cast/features/walkie_talkie/services/audio_playback_service.dart'
     as _i199;
+import 'package:vibe_cast/features/walkie_talkie/services/e2e_encryption_service.dart'
+    as _i187;
 import 'package:vibe_cast/features/walkie_talkie/services/radio_sound_effects_service.dart'
     as _i78;
 import 'package:vibe_cast/features/walkie_talkie/services/walkie_repository.dart'
@@ -37,12 +39,15 @@ extension GetItInjectableX on _i174.GetIt {
     gh.lazySingleton<_i199.AudioPlaybackService>(
       () => _i199.AudioPlaybackService(),
     );
+    gh.lazySingleton<_i187.E2EEncryptionService>(
+      () => _i187.E2EEncryptionService(),
+    );
     gh.lazySingleton<_i78.RadioSoundEffectsService>(
       () => _i78.RadioSoundEffectsService(),
     );
     gh.lazySingleton<_i515.WalkieRepository>(() => _i515.WalkieRepository());
     gh.lazySingleton<_i519.WalkieSignalService>(
-      () => _i519.WalkieSignalService(),
+      () => _i519.WalkieSignalService(gh<_i187.E2EEncryptionService>()),
     );
     gh.lazySingleton<_i217.WalkieTalkieBloc>(
       () => _i217.WalkieTalkieBloc(

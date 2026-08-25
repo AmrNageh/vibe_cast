@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:injectable/injectable.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'e2e_encryption_service.dart';
 
 @lazySingleton
 class WalkieSignalService {
   io.Socket? _socket;
+  final E2EEncryptionService _encryptionService;
+  
+  WalkieSignalService(this._encryptionService);
   
   final _pttController = StreamController<Map<String, dynamic>>.broadcast();
   final _onlineUsersController = StreamController<List<dynamic>>.broadcast();
@@ -55,17 +59,24 @@ class WalkieSignalService {
       if (data != null && data['audioBlob'] != null) {
         if (data['senderId'] != null && data['senderId'] == _lastJoinArgs?['userId']) return;
         final audioBlob = data['audioBlob'];
+        Uint8List? rawBytes;
+        
         if (audioBlob is String) {
-          _audioController.add(base64Decode(audioBlob));
+          rawBytes = base64Decode(audioBlob);
         } else if (audioBlob is Uint8List) {
-          _audioController.add(audioBlob);
+          rawBytes = audioBlob;
         } else if (audioBlob is List<dynamic>) {
-          _audioController.add(Uint8List.fromList(audioBlob.cast<int>()));
+          rawBytes = Uint8List.fromList(audioBlob.cast<int>());
         } else if (audioBlob is List<int>) {
-          _audioController.add(Uint8List.fromList(audioBlob));
+          rawBytes = Uint8List.fromList(audioBlob);
         } else if (audioBlob is Map && audioBlob['type'] == 'Buffer' && audioBlob['data'] != null) {
           final dataList = audioBlob['data'] as List<dynamic>;
-          _audioController.add(Uint8List.fromList(dataList.cast<int>()));
+          rawBytes = Uint8List.fromList(dataList.cast<int>());
+        }
+        
+        if (rawBytes != null && _lastJoinArgs != null) {
+          final decrypted = _encryptionService.decryptAudio(_lastJoinArgs!['groupId'], rawBytes);
+          _audioController.add(decrypted);
         }
       }
     });
@@ -123,7 +134,8 @@ class WalkieSignalService {
   }
 
   void sendAudio(String groupId, String senderId, Uint8List audioData, {String? targetUserId}) {
-    final base64String = base64Encode(audioData);
+    final encrypted = _encryptionService.encryptAudio(groupId, audioData);
+    final base64String = base64Encode(encrypted);
     _socket?.emit('walkie:audio', {
       'groupId': groupId,
       'senderId': senderId,
@@ -134,7 +146,8 @@ class WalkieSignalService {
 
   /// Sends a live PCM chunk. Called continuously while PTT is held.
   void sendAudioChunk(String groupId, String senderId, Uint8List chunk, {String? targetUserId}) {
-    final base64String = base64Encode(chunk);
+    final encrypted = _encryptionService.encryptAudio(groupId, chunk);
+    final base64String = base64Encode(encrypted);
     _socket?.emit('walkie:audio', {
       'groupId': groupId,
       'senderId': senderId,

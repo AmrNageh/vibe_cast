@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:avatar_glow/avatar_glow.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/widgets/neumorphic_container.dart';
 import '../bloc/walkie_talkie_bloc.dart';
@@ -202,6 +203,18 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                           shape: BoxShape.circle,
                           child: Icon(Icons.arrow_back),
                         ),
+                      ),
+                      Column(
+                        children: [
+                          const Text('CONNECTED', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                          Row(
+                            children: [
+                              Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle)),
+                              const SizedBox(width: 4),
+                              const Text('45ms ping', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            ],
+                          ),
+                        ],
                       ),
                       Row(
                         children: [
@@ -426,16 +439,31 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                           child: Row(
                                             children: [
                                               Expanded(
-                                                child: Text(
-                                                  member.name.toUpperCase(),
-                                                  style: TextStyle(
-                                                    fontFamily: 'DotGothic16', 
-                                                    fontSize: 16, 
-                                                    color: isSelected ? Colors.white : Colors.black87, 
-                                                    fontWeight: FontWeight.bold,
+                                                child: Row(
+                                                  children: [
+                                                  Text(
+                                                    member.name.toUpperCase(),
+                                                    style: TextStyle(
+                                                      fontFamily: 'DotGothic16', 
+                                                      fontSize: 16, 
+                                                      color: isSelected ? Colors.white : Colors.black87, 
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                    overflow: TextOverflow.ellipsis,
                                                   ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
+                                                  const SizedBox(width: 8),
+                                                  if (member.id == widget.group.ownerId)
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red.withValues(alpha: 0.2),
+                                                        borderRadius: BorderRadius.circular(4),
+                                                        border: Border.all(color: Colors.red),
+                                                      ),
+                                                      child: const Text('ADMIN', style: TextStyle(fontSize: 9, color: Colors.red, fontWeight: FontWeight.bold)),
+                                                    ),
+                                                ],
+                                              ),
                                               ),
                                               GestureDetector(
                                                 onTap: () {
@@ -518,7 +546,10 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                           // Giant PTT Button anchored to center-bottom
                           Positioned(
                             bottom: 110,
-                            child: GestureDetector(
+                            child: AvatarGlow(
+                              animate: isTransmitting,
+                              glowColor: Colors.red,
+                              child: GestureDetector(
                               onLongPressStart: (_) {
                                 if (isReceiving) {
                                   HapticFeedback.vibrate();
@@ -545,9 +576,9 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                   ),
                                 ),
                               ),
+                              ),
                             ),
                           ),
-
 
                           // Bottom Action Row
                           Positioned(

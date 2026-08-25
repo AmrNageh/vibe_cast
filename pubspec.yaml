@@ -56,6 +56,9 @@ dependencies:
   wakelock_plus: ^1.5.2
   audioplayers: ^6.7.1
   path_provider: ^2.1.6
+  encrypt: ^5.0.3
+  avatar_glow: ^3.0.1
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:
