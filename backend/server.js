@@ -43,8 +43,7 @@ app.get('/api/walkie/groups', (req, res) => {
       name: g.name,
       description: g.description,
       onlineCount: g.activeMembers.length,
-      ownerId: g.ownerId,
-      permanentMembers: g.permanentMembers
+      ownerId: g.ownerId
     }))
   });
 });
@@ -83,6 +82,28 @@ app.post('/api/walkie/groups/join', (req, res) => {
   }
 
   res.json({ success: true, data: group });
+});
+
+// Permanently leave a group
+app.post('/api/walkie/groups/leave', (req, res) => {
+  const { groupId, userId } = req.body;
+  if (!groupId || !userId) return res.status(400).json({ success: false, message: 'groupId and userId are required' });
+
+  const group = groups.find(g => g.id === groupId);
+  if (!group) return res.status(404).json({ success: false, message: 'Group not found' });
+
+  // Remove from permanentMembers
+  group.permanentMembers = group.permanentMembers.filter(id => id !== userId);
+  
+  // If no members left, delete the group
+  if (group.permanentMembers.length === 0) {
+    const index = groups.findIndex(g => g.id === groupId);
+    if (index !== -1) groups.splice(index, 1);
+    delete historyLogs[groupId];
+    delete chatLogs[groupId];
+  }
+
+  res.json({ success: true });
 });
 
 // Get voice history
@@ -165,21 +186,29 @@ io.on('connection', (socket) => {
       senderId: senderId || socket.id,
       senderName: senderName || 'Unknown',
       timestamp: new Date().toISOString(),
-      action: targetUserId ? `started private call` : 'started speaking'
+      action: 'started speaking'
     };
     
     if (!historyLogs[groupId]) historyLogs[groupId] = [];
     historyLogs[groupId].push(logEntry);
     if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
 
+    const payload = {
+      senderId: senderId || socket.id,
+      senderName,
+      targetUserId,
+    };
+
     if (targetUserId) {
       const group = groups.find(g => g.id === groupId);
-      const targetUser = group?.activeMembers.find(m => m.userId === targetUserId);
-      if (targetUser) {
-        io.to(targetUser.socketId).emit('walkie:ptt_start', { senderId: senderId || socket.id, senderName });
+      if (group) {
+        const targetMember = group.activeMembers.find(m => m.userId === targetUserId);
+        if (targetMember) {
+          io.to(targetMember.socketId).emit('walkie:ptt_start', payload);
+        }
       }
     } else {
-      io.to(groupId).emit('walkie:ptt_start', { senderId: senderId || socket.id, senderName });
+      socket.to(groupId).emit('walkie:ptt_start', payload);
     }
     
     io.to(groupId).emit('walkie:history', historyLogs[groupId]);
@@ -200,14 +229,21 @@ io.on('connection', (socket) => {
     historyLogs[groupId].push(logEntry);
     if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
 
+    const payload = {
+      senderId: senderId || socket.id,
+      targetUserId,
+    };
+
     if (targetUserId) {
       const group = groups.find(g => g.id === groupId);
-      const targetUser = group?.activeMembers.find(m => m.userId === targetUserId);
-      if (targetUser) {
-        io.to(targetUser.socketId).emit('walkie:ptt_stop', { senderId: senderId || socket.id });
+      if (group) {
+        const targetMember = group.activeMembers.find(m => m.userId === targetUserId);
+        if (targetMember) {
+          io.to(targetMember.socketId).emit('walkie:ptt_stop', payload);
+        }
       }
     } else {
-      io.to(groupId).emit('walkie:ptt_stop', { senderId: senderId || socket.id });
+      socket.to(groupId).emit('walkie:ptt_stop', payload);
     }
     
     io.to(groupId).emit('walkie:history', historyLogs[groupId]);
@@ -220,21 +256,22 @@ io.on('connection', (socket) => {
 
   socket.on('walkie:audio', (data) => {
     const { groupId, senderId, audioBlob, targetUserId } = data;
-    
+    const payload = {
+      senderId: senderId || socket.id,
+      audioBlob: audioBlob,
+      targetUserId
+    };
+
     if (targetUserId) {
       const group = groups.find(g => g.id === groupId);
-      const targetUser = group?.activeMembers.find(m => m.userId === targetUserId);
-      if (targetUser) {
-        io.to(targetUser.socketId).emit('walkie:audio', {
-          senderId: senderId || socket.id,
-          audioBlob: audioBlob
-        });
+      if (group) {
+        const targetMember = group.activeMembers.find(m => m.userId === targetUserId);
+        if (targetMember) {
+          io.to(targetMember.socketId).emit('walkie:audio', payload);
+        }
       }
     } else {
-      socket.to(groupId).emit('walkie:audio', {
-        senderId: senderId || socket.id,
-        audioBlob: audioBlob
-      });
+      socket.to(groupId).emit('walkie:audio', payload);
     }
   });
 
