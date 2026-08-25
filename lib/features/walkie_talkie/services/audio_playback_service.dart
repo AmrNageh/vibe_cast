@@ -9,7 +9,7 @@ import 'package:audio_session/audio_session.dart';
 class AudioPlaybackService {
   FlutterSoundPlayer? _player;
   bool _isInitialized = false;
-  bool _isInitializing = false;
+  Completer<void>? _initCompleter;
 
   // Stream state guards to prevent native crashes
   bool _isStreaming = false;
@@ -17,12 +17,10 @@ class AudioPlaybackService {
   bool _isStopping = false;
   bool _isPrebuffering = true;
 
-  // Jitter buffer queue (Pre-buffers 3 chunks / ~180ms to prevent voice cutting & underruns)
+  // Jitter buffer queue (Pre-buffers chunks before starting native player)
   final List<Uint8List> _bufferQueue = [];
   static const int _prebufferThreshold = 3;
-  static const int _maxQueueSize = 25; // Prevents memory bloat if network lags severely
-
-  Timer? _playbackLoopTimer;
+  static const int _maxQueueSize = 25;
 
   final _playbackAmplitudeController =
       StreamController<double>.broadcast();
@@ -33,14 +31,14 @@ class AudioPlaybackService {
 
   Future<void> init() async {
     if (_isInitialized) return;
-    if (_isInitializing) {
-      while (_isInitializing && !_isInitialized) {
-        await Future.delayed(const Duration(milliseconds: 50));
-      }
+
+    // If already initializing, wait for it to complete instead of racing
+    if (_initCompleter != null) {
+      await _initCompleter!.future;
       return;
     }
 
-    _isInitializing = true;
+    _initCompleter = Completer<void>();
     try {
       final session = await AudioSession.instance;
       await session.configure(AudioSessionConfiguration(
@@ -70,7 +68,8 @@ class AudioPlaybackService {
       debugPrint('AudioPlaybackService init error: $e');
       _isInitialized = false;
     } finally {
-      _isInitializing = false;
+      _initCompleter?.complete();
+      _initCompleter = null;
     }
   }
 
@@ -78,6 +77,11 @@ class AudioPlaybackService {
   Future<void> startLivePlayback() async {
     if (!_isInitialized) await init();
     if (!_isInitialized) return;
+
+    // FIX Bug #1: Force-stop native player if it's still running before restart
+    if (_isPlayerActive) {
+      await _forceStopNativePlayer();
+    }
 
     // Reset stream state safely
     _isStreaming = true;
@@ -98,26 +102,41 @@ class AudioPlaybackService {
   }
 
   /// Feeds an incoming PCM chunk into the jitter buffer.
+  /// FIX Bug #2: Once player is active, writes directly to native AudioTrack
+  /// instead of using a Timer.periodic drain loop.
   void feedChunk(Uint8List chunk) {
     if (!_isStreaming || _isStopping || chunk.isEmpty) return;
 
-    // Push into jitter queue
-    if (_bufferQueue.length < _maxQueueSize) {
-      _bufferQueue.add(chunk);
-    } else {
-      // Queue overrun drop oldest packet to maintain low latency
-      _bufferQueue.removeAt(0);
-      _bufferQueue.add(chunk);
-    }
+    if (_isPrebuffering) {
+      // Still pre-buffering — accumulate chunks
+      if (_bufferQueue.length < _maxQueueSize) {
+        _bufferQueue.add(chunk);
+      } else {
+        _bufferQueue.removeAt(0);
+        _bufferQueue.add(chunk);
+      }
 
-    // Check pre-buffering condition
-    if (_isPrebuffering && _bufferQueue.length >= _prebufferThreshold) {
-      _isPrebuffering = false;
-      _startNativePlayer();
+      // Check pre-buffering threshold
+      if (_bufferQueue.length >= _prebufferThreshold) {
+        _isPrebuffering = false;
+        _startNativePlayer();
+      }
+    } else if (_isPlayerActive) {
+      // Player is active — drain any queued chunks first, then feed new one directly
+      _drainQueueDirect();
+      _feedSafe(chunk);
+    } else {
+      // Player not yet active (still starting) — buffer
+      if (_bufferQueue.length < _maxQueueSize) {
+        _bufferQueue.add(chunk);
+      } else {
+        _bufferQueue.removeAt(0);
+        _bufferQueue.add(chunk);
+      }
     }
   }
 
-  /// Starts native player and begins periodic queue draining loop.
+  /// Starts native player and immediately drains the pre-buffer.
   Future<void> _startNativePlayer() async {
     if (!_isStreaming || _isStopping || _isPlayerActive) return;
 
@@ -133,60 +152,66 @@ class AudioPlaybackService {
       _isPlayerActive = true;
       debugPrint('Native AudioTrack player started from stream');
 
-      // Start periodic queue consumer loop to feed native hardware smoothly
-      _playbackLoopTimer?.cancel();
-      _playbackLoopTimer = Timer.periodic(const Duration(milliseconds: 30), (timer) {
-        _drainQueue();
-      });
+      // Immediately drain pre-buffered chunks
+      _drainQueueDirect();
     } catch (e) {
       debugPrint('Failed to start native stream player: $e');
       _isPlayerActive = false;
     }
   }
 
-  /// Drains available chunks in jitter buffer to native AudioTrack.
-  void _drainQueue() {
-    if (!_isStreaming || _isStopping || !_isPlayerActive || _player == null) {
-      return;
-    }
-
+  /// Drains all queued chunks directly to native player (no timer).
+  void _drainQueueDirect() {
     while (_bufferQueue.isNotEmpty && _isPlayerActive && !_isStopping) {
       final chunk = _bufferQueue.removeAt(0);
-      try {
-        _player!.feedUint8FromStream(chunk);
-      } catch (e) {
-        debugPrint('Safe caught feed error: $e');
-        break;
-      }
+      _feedSafe(chunk);
     }
   }
 
-  /// Safely stop live streaming playback without native crash.
-  Future<void> stopLivePlayback() async {
-    _isStopping = true;
-    _isStreaming = false;
-    _isPlayerActive = false;
-    _isPrebuffering = false;
+  /// Safely feeds a single chunk to native player with error catch.
+  void _feedSafe(Uint8List chunk) {
+    if (!_isPlayerActive || _isStopping || _player == null) return;
+    try {
+      _player!.feedUint8FromStream(chunk);
+    } catch (e) {
+      debugPrint('Safe caught feed error: $e');
+    }
+  }
 
-    _playbackLoopTimer?.cancel();
-    _playbackLoopTimer = null;
-
-    _animTimer?.cancel();
-    _playbackAmplitudeController.add(0.0);
-
-    // Drain remaining chunks before stopping
-    _bufferQueue.clear();
-
+  /// Force-stops native player, awaiting completion.
+  Future<void> _forceStopNativePlayer() async {
     try {
       if (_player != null && !_player!.isStopped) {
         await _player!.stopPlayer();
       }
     } catch (e) {
-      debugPrint('Safe caught stop error: $e');
-    } finally {
-      _isStopping = false;
+      debugPrint('Force stop player error: $e');
+    }
+    _isPlayerActive = false;
+  }
+
+  /// Safely stop live streaming playback without native crash.
+  /// FIX Bug #5: Waits for init to complete before stopping.
+  Future<void> stopLivePlayback() async {
+    _isStopping = true;
+    _isStreaming = false;
+    _isPrebuffering = false;
+
+    // Wait for any in-progress init to complete before stopping
+    if (_initCompleter != null) {
+      await _initCompleter!.future;
     }
 
+    _animTimer?.cancel();
+    _playbackAmplitudeController.add(0.0);
+
+    // Clear remaining queued chunks
+    _bufferQueue.clear();
+
+    // Force stop native player
+    await _forceStopNativePlayer();
+
+    _isStopping = false;
     debugPrint('Live playback stream safely stopped');
   }
 
@@ -194,7 +219,6 @@ class AudioPlaybackService {
 
   void dispose() {
     stop();
-    _playbackLoopTimer?.cancel();
     _animTimer?.cancel();
     _playbackAmplitudeController.close();
     _player?.closePlayer();

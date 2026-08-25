@@ -199,15 +199,16 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     }
   }
 
-  void _onIncomingTransmission(WalkieIncomingTransmission event, Emitter<WalkieTalkieState> emit) {
+  Future<void> _onIncomingTransmission(WalkieIncomingTransmission event, Emitter<WalkieTalkieState> emit) async {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
       emit(currentState.copyWith(
         status: TransmissionStatus.receiving,
         activeTransmitterName: event.senderName,
       ));
-      // Start live player immediately so chunks that arrive are played instantly
-      _audioPlaybackService.startLivePlayback();
+      // FIX Bug #4: Await startLivePlayback so native player is fully initialized
+      // before any feedChunk() calls arrive from the socket listener
+      await _audioPlaybackService.startLivePlayback();
     }
   }
 

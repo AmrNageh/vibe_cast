@@ -77,6 +77,7 @@ class AudioCaptureService {
         codec: Codec.pcm16,
         numChannels: 1,
         sampleRate: 16000, // 16kHz mono — good quality, low bandwidth
+        bufferSize: 640,   // FIX Bug #3: 20ms chunks (16000 * 0.020 * 2 bytes = 640) for consistent streaming
       );
 
       // Amplitude monitoring

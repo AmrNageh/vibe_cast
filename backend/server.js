@@ -9,7 +9,10 @@ const io = new Server(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
-  }
+  },
+  maxHttpBufferSize: 5e6, // 5MB — handle large base64 audio chunks without disconnect
+  pingTimeout: 30000,
+  pingInterval: 10000,
 });
 
 app.use(cors());
