@@ -132,6 +132,18 @@ class WalkieSignalService {
     });
   }
 
+  /// Sends a live PCM chunk. Called continuously while PTT is held.
+  void sendAudioChunk(String groupId, String senderId, Uint8List chunk, {String? targetUserId}) {
+    final base64String = base64Encode(chunk);
+    _socket?.emit('walkie:audio', {
+      'groupId': groupId,
+      'senderId': senderId,
+      'audioBlob': base64String,
+      'targetUserId': targetUserId,
+      'isChunk': true, // hint for receiver: play immediately, don't buffer
+    });
+  }
+
   void disconnect() {
     _socket?.disconnect();
     _socket?.dispose();

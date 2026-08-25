@@ -25,6 +25,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   StreamSubscription? _chatHistorySub;
   StreamSubscription? _chatSub;
   StreamSubscription? _errorSub;
+  StreamSubscription? _chunkSub; // live capture chunks → socket
 
   WalkieTalkieBloc(
     this._audioCaptureService,
@@ -58,9 +59,10 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
       // Connect to the signaling server
       _walkieSignalService.connect(AppConfig.serverUrl);
       
+      // Incoming PCM chunk → feed directly to live player
       _audioSignalSub?.cancel();
-      _audioSignalSub = _walkieSignalService.audioStream.listen((audioBlob) {
-        _audioPlaybackService.playAudioBlob(audioBlob);
+      _audioSignalSub = _walkieSignalService.audioStream.listen((chunk) {
+        _audioPlaybackService.feedChunk(chunk);
       });
       
       _pttSignalSub?.cancel();
@@ -150,26 +152,40 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   }
 
   Future<void> _onPTTPressed(WalkiePTTPressed event, Emitter<WalkieTalkieState> emit) async {
-      final currentState = state;
-      if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
-        emit(currentState.copyWith(status: TransmissionStatus.transmitting, activeTransmitterName: event.targetUserId != null ? 'Private Call' : 'Me'));
-      
-        _walkieSignalService.startPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId, targetUserId: event.targetUserId);
-        await _audioCaptureService.startRecording();
-      }
+    final currentState = state;
+    if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
+      emit(currentState.copyWith(
+          status: TransmissionStatus.transmitting,
+          activeTransmitterName: event.targetUserId != null ? 'Private Call' : 'Me'));
+
+      _walkieSignalService.startPtt(
+          currentState.group.id, _walkieRepository.userName, _walkieRepository.userId,
+          targetUserId: event.targetUserId);
+
+      // Subscribe to live chunks and forward each one immediately
+      _chunkSub?.cancel();
+      _chunkSub = _audioCaptureService.chunkStream.listen((chunk) {
+        _walkieSignalService.sendAudioChunk(
+            currentState.group.id, _walkieRepository.userId, chunk,
+            targetUserId: event.targetUserId);
+      });
+
+      await _audioCaptureService.startRecording();
     }
+  }
 
   Future<void> _onPTTReleased(WalkiePTTReleased event, Emitter<WalkieTalkieState> emit) async {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.transmitting) {
       emit(currentState.copyWith(status: TransmissionStatus.idle, clearTransmitter: true));
-      
-      final audioBytes = await _audioCaptureService.stopRecording();
-      if (audioBytes != null && audioBytes.isNotEmpty) {
-        _walkieSignalService.sendAudio(currentState.group.id, _walkieRepository.userId, audioBytes, targetUserId: event.targetUserId);
-      }
-      
-      _walkieSignalService.stopPtt(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
+
+      // Stop chunk subscription FIRST, then stop recorder
+      await _chunkSub?.cancel();
+      _chunkSub = null;
+      await _audioCaptureService.stopRecording();
+
+      _walkieSignalService.stopPtt(
+          currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
     }
   }
 
@@ -180,6 +196,8 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
         status: TransmissionStatus.receiving,
         activeTransmitterName: event.senderName,
       ));
+      // Start live player immediately so chunks that arrive are played instantly
+      _audioPlaybackService.startLivePlayback();
     }
   }
 
@@ -187,7 +205,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.receiving) {
       emit(currentState.copyWith(status: TransmissionStatus.idle, clearTransmitter: true));
-      _audioPlaybackService.stop();
+      _audioPlaybackService.stopLivePlayback();
     }
   }
 
@@ -278,6 +296,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     _chatHistorySub?.cancel();
     _chatSub?.cancel();
     _errorSub?.cancel();
+    _chunkSub?.cancel();
     return super.close();
   }
 }
