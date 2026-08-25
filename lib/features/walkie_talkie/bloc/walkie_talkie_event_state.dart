@@ -148,6 +148,15 @@ class WalkieCodecToggled extends WalkieTalkieEvent {
   List<Object?> get props => [useOpus];
 }
 
+class WalkieEmergencyAlertTriggered extends WalkieTalkieEvent {
+  final String? latitude;
+  final String? longitude;
+  const WalkieEmergencyAlertTriggered({this.latitude, this.longitude});
+
+  @override
+  List<Object?> get props => [latitude, longitude];
+}
+
 enum TransmissionStatus { idle, transmitting, receiving }
 
 abstract class WalkieTalkieState extends Equatable {

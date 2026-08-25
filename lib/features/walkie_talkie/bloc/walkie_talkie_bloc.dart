@@ -6,6 +6,7 @@ import '../../../core/config/app_config.dart';
 import 'walkie_talkie_event_state.dart';
 import '../services/audio_capture_service.dart';
 import '../services/audio_playback_service.dart';
+import '../services/radio_sound_effects_service.dart';
 import '../services/walkie_signal_service.dart';
 import '../services/walkie_repository.dart';
 import '../models/online_user_entity.dart';
@@ -16,8 +17,10 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   final AudioCaptureService _audioCaptureService;
   final AudioPlaybackService _audioPlaybackService;
+  final RadioSoundEffectsService _radioSoundEffectsService;
   final WalkieSignalService _walkieSignalService;
   final WalkieRepository _walkieRepository;
+
   StreamSubscription? _audioSignalSub;
   StreamSubscription? _pttSignalSub;
   StreamSubscription? _onlineUsersSub;
@@ -30,11 +33,12 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   WalkieTalkieBloc(
     this._audioCaptureService,
     this._audioPlaybackService,
+    this._radioSoundEffectsService,
     this._walkieSignalService,
     this._walkieRepository,
   ) : super(WalkieTalkieInitial()) {
     on<WalkieInitialized>(_onInitialized);
-    on<WalkieGroupJoined>( (e, emit) {} ); // Not used yet
+    on<WalkieGroupJoined>((e, emit) {});
     on<WalkieGroupLeft>(_onGroupLeft);
     on<WalkieChannelEntered>(_onChannelEntered);
     on<WalkieOnlineUsersUpdated>(_onOnlineUsersUpdated);
@@ -49,22 +53,22 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     on<WalkieGroupJoinedByInvite>(_onGroupJoinedByInvite);
     on<WalkieGroupPermanentlyLeft>(_onGroupPermanentlyLeft);
     on<WalkieCodecToggled>(_onCodecToggled);
+    on<WalkieEmergencyAlertTriggered>(_onEmergencyAlertTriggered);
   }
 
   Future<void> _onInitialized(WalkieInitialized event, Emitter<WalkieTalkieState> emit) async {
     emit(WalkieTalkieLoading());
     try {
-      // Initialize audio services (they configure their own audio sessions)
+      // Initialize audio services
       await _audioPlaybackService.init();
-      // Connect to the signaling server
       _walkieSignalService.connect(AppConfig.serverUrl);
-      
+
       // Incoming PCM chunk → feed directly to live player
       _audioSignalSub?.cancel();
       _audioSignalSub = _walkieSignalService.audioStream.listen((chunk) {
         _audioPlaybackService.feedChunk(chunk);
       });
-      
+
       _pttSignalSub?.cancel();
       _pttSignalSub = _walkieSignalService.pttStream.listen((data) {
         if (data['type'] == 'start') {
@@ -154,6 +158,9 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   Future<void> _onPTTPressed(WalkiePTTPressed event, Emitter<WalkieTalkieState> emit) async {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.idle) {
+      // Play tactical PTT start chirp sound effect
+      await _radioSoundEffectsService.playPttStartSound();
+
       emit(currentState.copyWith(
           status: TransmissionStatus.transmitting,
           activeTransmitterName: event.targetUserId != null ? 'Private Call' : 'Me'));
@@ -186,6 +193,9 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
 
       _walkieSignalService.stopPtt(
           currentState.group.id, _walkieRepository.userName, _walkieRepository.userId);
+
+      // Play tactical PTT stop squelch sound effect
+      await _radioSoundEffectsService.playPttStopSound();
     }
   }
 
@@ -206,6 +216,17 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     if (currentState is WalkieTalkieInChannel && currentState.status == TransmissionStatus.receiving) {
       emit(currentState.copyWith(status: TransmissionStatus.idle, clearTransmitter: true));
       _audioPlaybackService.stopLivePlayback();
+      // Play roger beep squelch sound effect on transmission finish
+      _radioSoundEffectsService.playPttStopSound();
+    }
+  }
+
+  Future<void> _onEmergencyAlertTriggered(WalkieEmergencyAlertTriggered event, Emitter<WalkieTalkieState> emit) async {
+    final currentState = state;
+    if (currentState is WalkieTalkieInChannel) {
+      await _radioSoundEffectsService.playEmergencySound();
+      final alertMsg = '🚨 EMERGENCY ALARM: User ${_walkieRepository.userName} sent panic alert!';
+      _walkieSignalService.sendChatMessage(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId, alertMsg);
     }
   }
 
@@ -263,7 +284,6 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     if (currentState is WalkieTalkieGroupsLoaded) {
       try {
         final newGroup = await _walkieRepository.joinGroupFromInvite(event.inviteId);
-        // Avoid duplicate adding
         if (!currentState.groups.any((g) => g.id == newGroup.id)) {
           emit(WalkieTalkieGroupsLoaded(
             groups: [...currentState.groups, newGroup],

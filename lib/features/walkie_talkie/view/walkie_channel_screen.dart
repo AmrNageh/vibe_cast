@@ -220,6 +220,49 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                             ),
                           ),
                           const SizedBox(width: 16),
+                          GestureDetector(
+                            onTap: () {
+                              HapticFeedback.heavyImpact();
+                              showDialog(
+                                context: context,
+                                builder: (dialogCtx) => AlertDialog(
+                                  backgroundColor: Colors.red[900],
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+                                      SizedBox(width: 8),
+                                      Text('EMERGENCY ALARM', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  content: const Text(
+                                    'Broadcast instant panic siren and alert tone to all channel members?',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dialogCtx),
+                                      child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+                                      onPressed: () {
+                                        Navigator.pop(dialogCtx);
+                                        _bloc.add(const WalkieEmergencyAlertTriggered());
+                                      },
+                                      child: const Text('BROADCAST ALARM', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                            child: const NeumorphicContainer(
+                              width: 50,
+                              height: 50,
+                              shape: BoxShape.circle,
+                              child: Icon(Icons.warning_rounded, size: 22, color: Colors.redAccent),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
                           BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
                             builder: (context, state) {
                               return GestureDetector(
