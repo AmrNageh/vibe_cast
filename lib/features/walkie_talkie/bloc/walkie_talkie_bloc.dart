@@ -29,6 +29,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
   StreamSubscription? _chatSub;
   StreamSubscription? _errorSub;
   StreamSubscription? _chunkSub; // live capture chunks → socket
+  StreamSubscription? _emergencySub;
 
   WalkieTalkieBloc(
     this._audioCaptureService,
@@ -54,6 +55,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     on<WalkieGroupPermanentlyLeft>(_onGroupPermanentlyLeft);
     on<WalkieCodecToggled>(_onCodecToggled);
     on<WalkieEmergencyAlertTriggered>(_onEmergencyAlertTriggered);
+    on<WalkieEmergencyReceived>(_onEmergencyReceived);
   }
 
   Future<void> _onInitialized(WalkieInitialized event, Emitter<WalkieTalkieState> emit) async {
@@ -108,6 +110,11 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
       _errorSub?.cancel();
       _errorSub = _walkieSignalService.errorStream.listen((errorMsg) {
         emit(WalkieTalkieFailure(errorMsg));
+      });
+
+      _emergencySub?.cancel();
+      _emergencySub = _walkieSignalService.emergencyStream.listen((data) {
+        add(WalkieEmergencyReceived(data));
       });
 
       await _walkieRepository.initIdentity();
@@ -226,8 +233,29 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     final currentState = state;
     if (currentState is WalkieTalkieInChannel) {
       await _radioSoundEffectsService.playEmergencySound();
-      final alertMsg = '🚨 EMERGENCY ALARM: User ${_walkieRepository.userName} sent panic alert!';
+      _walkieSignalService.sendEmergencyAlert(
+        currentState.group.id, 
+        _walkieRepository.userName, 
+        _walkieRepository.userId,
+        latitude: event.latitude,
+        longitude: event.longitude,
+      );
+      // Also send a chat message for the log
+      final alertMsg = '🚨 EMERGENCY ALARM TRIGGERED (Lat: ${event.latitude ?? "N/A"}, Lon: ${event.longitude ?? "N/A"})';
       _walkieSignalService.sendChatMessage(currentState.group.id, _walkieRepository.userName, _walkieRepository.userId, alertMsg);
+    }
+  }
+
+  Future<void> _onEmergencyReceived(WalkieEmergencyReceived event, Emitter<WalkieTalkieState> emit) async {
+    final currentState = state;
+    if (currentState is WalkieTalkieInChannel) {
+      await _radioSoundEffectsService.playEmergencySound();
+      emit(currentState.copyWith(
+        lastEmergencyData: {
+          ...event.data,
+          '_timestamp': DateTime.now().millisecondsSinceEpoch,
+        }
+      ));
     }
   }
 
@@ -318,6 +346,7 @@ class WalkieTalkieBloc extends Bloc<WalkieTalkieEvent, WalkieTalkieState> {
     _chatSub?.cancel();
     _errorSub?.cancel();
     _chunkSub?.cancel();
+    _emergencySub?.cancel();
     return super.close();
   }
 }

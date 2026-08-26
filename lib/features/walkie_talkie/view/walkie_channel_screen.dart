@@ -13,6 +13,7 @@ import '../services/audio_capture_service.dart';
 import '../services/audio_playback_service.dart';
 import '../services/walkie_repository.dart';
 import '../services/walkie_signal_service.dart';
+
 class WalkieChannelScreen extends StatefulWidget {
   final WalkieGroupEntity group;
   const WalkieChannelScreen({super.key, required this.group});
@@ -26,9 +27,53 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
   late final AnimationController _waveController;
   String? _selectedTargetUserId;
   String _currentStatus = 'Active';
+  int? _lastEmergencyTimestamp;
 
-  void _showChatSheet(BuildContext context, WalkieTalkieInChannel state) {
+  void _showEmergencyDialog(BuildContext context, Map<String, dynamic> emergencyData) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: Colors.red[900],
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+            SizedBox(width: 8),
+            Text('EMERGENCY ALERT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${emergencyData['senderName'] ?? "Someone"} triggered the Panic Alarm!',
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            if (emergencyData['latitude'] != null && emergencyData['longitude'] != null)
+              Text(
+                'Location:\nLat: ${emergencyData['latitude']}\nLon: ${emergencyData['longitude']}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('DISMISS', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showChatSheet(BuildContext context, WalkieTalkieInChannel state, {String? targetUserId, String? targetUserName}) {
     final textController = TextEditingController();
+    final isDM = targetUserId != null;
+    final chatTitle = isDM ? 'DM: ${targetUserName!.toUpperCase()}' : 'CHANNEL CHAT';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -44,7 +89,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                 const SizedBox(height: 16),
                 Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.circular(2))),
                 const SizedBox(height: 16),
-                Text('CHANNEL CHAT', style: Theme.of(context).textTheme.titleMedium?.copyWith(letterSpacing: 2)),
+                Text(chatTitle, style: Theme.of(context).textTheme.titleMedium?.copyWith(letterSpacing: 2)),
                 const Divider(),
                 Expanded(
                   child: BlocBuilder<WalkieTalkieBloc, WalkieTalkieState>(
@@ -102,6 +147,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                       GestureDetector(
                         onTap: () {
                           if (textController.text.trim().isNotEmpty) {
+                            // DM logic is not fully backend supported yet, so it broadcasts for now unless customized
                             getIt<WalkieSignalService>().sendChatMessage(
                               state.group.id,
                               getIt<WalkieRepository>().userName,
@@ -168,6 +214,13 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
       child: BlocListener<WalkieTalkieBloc, WalkieTalkieState>(
         listener: (context, state) {
           if (state is WalkieTalkieInChannel) {
+            if (state.lastEmergencyData != null) {
+               final currentTimestamp = state.lastEmergencyData!['_timestamp'];
+               if (_lastEmergencyTimestamp != currentTimestamp) {
+                 _lastEmergencyTimestamp = currentTimestamp;
+                 _showEmergencyDialog(context, state.lastEmergencyData!);
+               }
+            }
             if (state.status == TransmissionStatus.transmitting) {
               HapticFeedback.heavyImpact();
             } else if (state.status == TransmissionStatus.idle) {
@@ -260,7 +313,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                       style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
                                       onPressed: () {
                                         Navigator.pop(dialogCtx);
-                                        _bloc.add(const WalkieEmergencyAlertTriggered());
+                                        _bloc.add(const WalkieEmergencyAlertTriggered(latitude: 30.0444, longitude: 31.2357));
                                       },
                                       child: const Text('BROADCAST ALARM', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                                     ),
@@ -332,7 +385,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
 
 
 
-              // Main PTT Area (mimicking the bottom sheet)
+              // Main PTT Area
               Expanded(
                 child: NeumorphicContainer(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -441,6 +494,25 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                               Expanded(
                                                 child: Row(
                                                   children: [
+                                                    // STATUS INDICATOR
+                                                    Container(
+                                                      width: 10,
+                                                      height: 10,
+                                                      margin: const EdgeInsets.only(right: 8),
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        color: (state.status == TransmissionStatus.receiving && state.activeTransmitterName == member.name)
+                                                                ? Colors.orange // BUSY (Transmitting)
+                                                                : Colors.green, // ACTIVE
+                                                        boxShadow: [
+                                                          BoxShadow(
+                                                            color: ((state.status == TransmissionStatus.receiving && state.activeTransmitterName == member.name) ? Colors.orange : Colors.green).withValues(alpha: 0.5),
+                                                            blurRadius: 4,
+                                                            spreadRadius: 1,
+                                                          )
+                                                        ]
+                                                      ),
+                                                    ),
                                                   Text(
                                                     member.name.toUpperCase(),
                                                     style: TextStyle(
@@ -468,7 +540,7 @@ class _WalkieChannelScreenState extends State<WalkieChannelScreen> with SingleTi
                                               GestureDetector(
                                                 onTap: () {
                                                   HapticFeedback.lightImpact();
-                                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('DM ${member.name} (Coming soon)')));
+                                                  _showChatSheet(context, state, targetUserId: member.id, targetUserName: member.name);
                                                 },
                                                 child: Icon(Icons.message, size: 20, color: isSelected ? Colors.white70 : Colors.black54),
                                               ),

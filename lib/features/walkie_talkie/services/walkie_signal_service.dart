@@ -16,6 +16,7 @@ class WalkieSignalService {
   final _onlineUsersController = StreamController<List<dynamic>>.broadcast();
   final _historyController = StreamController<List<dynamic>>.broadcast();
   final _errorController = StreamController<String>.broadcast();
+  final _emergencyController = StreamController<Map<String, dynamic>>.broadcast();
   final _chatController = StreamController<Map<String, dynamic>>.broadcast();
   final _chatHistoryController = StreamController<List<dynamic>>.broadcast();
   final _audioController = StreamController<Uint8List>.broadcast();
@@ -24,6 +25,7 @@ class WalkieSignalService {
   Stream<List<dynamic>> get onlineUsersStream => _onlineUsersController.stream;
   Stream<List<dynamic>> get historyStream => _historyController.stream;
   Stream<String> get errorStream => _errorController.stream;
+  Stream<Map<String, dynamic>> get emergencyStream => _emergencyController.stream;
   Stream<Map<String, dynamic>> get chatStream => _chatController.stream;
   Stream<List<dynamic>> get chatHistoryStream => _chatHistoryController.stream;
   Stream<Uint8List> get audioStream => _audioController.stream;
@@ -55,6 +57,12 @@ class WalkieSignalService {
     _socket?.on('walkie:history', (data) => _historyController.add(data));
     _socket?.on('walkie:chat_message', (data) => _chatController.add(data));
     _socket?.on('walkie:chat_history', (data) => _chatHistoryController.add(data));
+    
+    _socket?.on('walkie:emergency', (data) {
+      if (data != null && data['senderId'] != null && data['senderId'] == _lastJoinArgs?['userId']) return;
+      _emergencyController.add(data);
+    });
+
     _socket?.on('walkie:audio', (data) {
       if (data != null && data['audioBlob'] != null) {
         if (data['senderId'] != null && data['senderId'] == _lastJoinArgs?['userId']) return;
@@ -124,6 +132,16 @@ class WalkieSignalService {
     });
   }
 
+  void sendEmergencyAlert(String groupId, String senderName, String senderId, {double? latitude, double? longitude}) {
+    _socket?.emit('walkie:emergency', {
+      'groupId': groupId,
+      'senderName': senderName,
+      'senderId': senderId,
+      'latitude': latitude,
+      'longitude': longitude,
+    });
+  }
+
   void stopPtt(String groupId, String senderName, String? senderId, {String? targetUserId}) {
     _socket?.emit('walkie:ptt_stop', {
       'groupId': groupId,
@@ -169,6 +187,7 @@ class WalkieSignalService {
     _onlineUsersController.close();
     _historyController.close();
     _errorController.close();
+    _emergencyController.close();
     _chatController.close();
     _chatHistoryController.close();
     _audioController.close();

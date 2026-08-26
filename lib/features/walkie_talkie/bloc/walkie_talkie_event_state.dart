@@ -149,12 +149,19 @@ class WalkieCodecToggled extends WalkieTalkieEvent {
 }
 
 class WalkieEmergencyAlertTriggered extends WalkieTalkieEvent {
-  final String? latitude;
-  final String? longitude;
+  final double? latitude;
+  final double? longitude;
   const WalkieEmergencyAlertTriggered({this.latitude, this.longitude});
 
   @override
   List<Object?> get props => [latitude, longitude];
+}
+
+class WalkieEmergencyReceived extends WalkieTalkieEvent {
+  final Map<String, dynamic> data;
+  const WalkieEmergencyReceived(this.data);
+  @override
+  List<Object?> get props => [data];
 }
 
 enum TransmissionStatus { idle, transmitting, receiving }
@@ -192,6 +199,7 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
   final List<OnlineUserEntity> members;
   final List<dynamic> history;
   final List<ChatMessageEntity> chatHistory;
+  final Map<String, dynamic>? lastEmergencyData;
 
   const WalkieTalkieInChannel({
     required this.group,
@@ -200,6 +208,7 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
     this.members = const [],
     this.history = const [],
     this.chatHistory = const [],
+    this.lastEmergencyData,
   });
 
   WalkieTalkieInChannel copyWith({
@@ -210,6 +219,7 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
     List<OnlineUserEntity>? members,
     List<dynamic>? history,
     List<ChatMessageEntity>? chatHistory,
+    Map<String, dynamic>? lastEmergencyData,
   }) {
     return WalkieTalkieInChannel(
       group: group ?? this.group,
@@ -218,11 +228,12 @@ class WalkieTalkieInChannel extends WalkieTalkieState {
       members: members ?? this.members,
       history: history ?? this.history,
       chatHistory: chatHistory ?? this.chatHistory,
+      lastEmergencyData: lastEmergencyData ?? this.lastEmergencyData,
     );
   }
 
   @override
-  List<Object?> get props => [group, status, activeTransmitterName, members, history, chatHistory];
+  List<Object?> get props => [group, status, activeTransmitterName, members, history, chatHistory, lastEmergencyData];
 }
 
 class WalkieTalkieFailure extends WalkieTalkieState {

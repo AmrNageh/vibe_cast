@@ -257,6 +257,34 @@ io.on('connection', (socket) => {
     leaveGroup(socket, groupId);
   });
 
+  socket.on('walkie:emergency', (data) => {
+    const { groupId, senderId, senderName, latitude, longitude } = data;
+    
+    // Log history
+    const logEntry = {
+      id: Date.now().toString(),
+      senderId: senderId || socket.id,
+      senderName: senderName || 'Unknown',
+      timestamp: new Date().toISOString(),
+      action: `triggered EMERGENCY ALARM`
+    };
+    
+    if (!historyLogs[groupId]) historyLogs[groupId] = [];
+    historyLogs[groupId].push(logEntry);
+    if (historyLogs[groupId].length > 50) historyLogs[groupId].shift(); 
+
+    const payload = {
+      senderId: senderId || socket.id,
+      senderName: senderName || 'Unknown',
+      latitude,
+      longitude,
+      timestamp: new Date().toISOString()
+    };
+
+    socket.to(groupId).emit('walkie:emergency', payload);
+    io.to(groupId).emit('walkie:history', historyLogs[groupId]);
+  });
+
   socket.on('walkie:audio', (data) => {
     const { groupId, senderId, audioBlob, targetUserId } = data;
     const payload = {

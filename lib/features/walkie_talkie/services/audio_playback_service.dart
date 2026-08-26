@@ -61,8 +61,7 @@ class AudioPlaybackService {
         androidWillPauseWhenDucked: true,
       ));
 
-      _player = FlutterSoundPlayer();
-      await _player!.openPlayer();
+      // Don't open the player here; we will open it dynamically per stream
       _isInitialized = true;
     } catch (e) {
       debugPrint('AudioPlaybackService init error: $e');
@@ -131,6 +130,11 @@ class AudioPlaybackService {
     if (!_isStreaming || _isStopping || _isPlayerActive) return;
 
     try {
+      if (_player == null) {
+        _player = FlutterSoundPlayer();
+        await _player!.openPlayer();
+      }
+      
       await _player!.startPlayerFromStream(
         codec: Codec.pcm16,
         numChannels: 1,
@@ -174,8 +178,12 @@ class AudioPlaybackService {
   /// Force-stops native player, awaiting completion.
   Future<void> _forceStopNativePlayer() async {
     try {
-      if (_player != null && !_player!.isStopped) {
-        await _player!.stopPlayer();
+      if (_player != null) {
+        if (!_player!.isStopped) {
+          await _player!.stopPlayer();
+        }
+        await _player!.closePlayer();
+        _player = null;
       }
     } catch (e) {
       debugPrint('Force stop player error: $e');
